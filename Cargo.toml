@@ -25,7 +25,7 @@ charms-app-runner = { path = "./charms-app-runner", version = "0.7.0" }
 charms-client = { path = "./charms-client", version = "0.7.0" }
 charms-data = { path = "./charms-data", version = "0.7.0" }
 clap = { version = "4.5.40", features = ["derive"] }
-clap_complete = { version = "4.5.54" }
+clap_complete = { version = "4.5.55" }
 cml-chain = { workspace = true }
 hex = { workspace = true }
 reqwest = { version = "0.12.20", features = ["json"] }
