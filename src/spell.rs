@@ -505,6 +505,7 @@ pub struct ProveRequest {
     pub fee_rate: f64,
     pub charms_fee: Option<CharmsFee>,
     pub chain: String,
+    pub temporary_secret_str: Option<String>,
 }
 
 pub struct Prover {
@@ -530,6 +531,7 @@ impl ProveSpellTx for Prover {
             fee_rate,
             charms_fee,
             chain,
+            temporary_secret_str,
         }: ProveRequest,
     ) -> anyhow::Result<Vec<String>> {
         let prev_txs = from_hex_txs(&prev_txs)?;
@@ -571,6 +573,7 @@ impl ProveSpellTx for Prover {
                     fee_rate,
                     charms_fee,
                     total_cycles,
+                    temporary_secret_str.as_deref(),
                 )?;
                 Ok(to_hex_txs(&txs))
             }

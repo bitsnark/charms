@@ -56,6 +56,7 @@ impl Prove for SpellCli {
             change_address,
             fee_rate,
             chain,
+            temporary_secret_str,
         }: SpellProveParams,
     ) -> Result<()> {
         // Parse funding UTXO early: to fail fast
@@ -79,6 +80,7 @@ impl Prove for SpellCli {
                 fee_rate,
                 charms_fee: None,
                 chain: chain.clone(),
+                temporary_secret_str
             })
             .await?;
 
@@ -230,6 +232,7 @@ impl Cast for SpellCli {
                 fee_rate,
                 charms_fee: None,
                 chain,
+                temporary_secret_str: None, // Temporary secret string is not used in casting
             })
             .await?;
         let [commit_tx, spell_tx] = txs.as_slice() else {

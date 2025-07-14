@@ -146,6 +146,10 @@ pub struct SpellProveParams {
     /// Target chain, defaults to `bitcoin`.
     #[arg(long, default_value = "bitcoin")]
     chain: String,
+
+    /// Temporary secret string for the spell prover.
+    #[arg(long, default_value = None)]
+    temporary_secret_str: Option<String>,
 }
 
 #[derive(Args)]
