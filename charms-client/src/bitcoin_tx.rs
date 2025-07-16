@@ -44,6 +44,12 @@ impl EnchantedTx for BitcoinTx {
 
         let (spell_vk, groth16_vk) = crate::tx::vks(spell.version, spell_vk)?;
 
+        // Get an environment variable to check if we are using a mock proof
+        if std::env::var("USE_MOCK_PROOF").ok() == Some("true".to_string()) {
+            tracing::debug!("Using mock proof for BitcoinTx");
+            return Ok(spell);
+        }
+
         Groth16Verifier::verify(
             &proof,
             crate::tx::to_sp1_pv(spell.version, &(spell_vk, &spell)).as_slice(),
