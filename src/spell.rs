@@ -1,8 +1,8 @@
 use crate::{
     app,
+    cli::spell,
     tx::{bitcoin_tx, txs_by_txid},
-    utils,
-    utils::{BoxedSP1Prover, Shared},
+    utils::{self, BoxedSP1Prover, Shared},
     SPELL_CHECKER_BINARY, SPELL_VK,
 };
 #[cfg(feature = "prover")]
@@ -11,7 +11,7 @@ use crate::{
     tx::cardano_tx,
 };
 use anyhow::{anyhow, ensure, Error};
-use bitcoin::{hashes::Hash, Amount};
+use bitcoin::{hashes::Hash, key::rand::rngs::mock, Amount};
 #[cfg(not(feature = "prover"))]
 use charms_client::bitcoin_tx::BitcoinTx;
 use charms_client::tx::Tx;
@@ -24,7 +24,7 @@ use charms_data::{util, App, Charms, Data, Transaction, TxId, UtxoId, B32};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_with::{base64::Base64, serde_as, IfIsHumanReadable};
-use sp1_sdk::{SP1ProofMode, SP1Stdin};
+use sp1_sdk::{SP1ProofMode, SP1ProofWithPublicValues, SP1Stdin};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -430,6 +430,15 @@ impl Prove for Prover {
 
         let app_public_inputs = &norm_spell.app_public_inputs;
 
+        // Print a timestamp
+        println!(
+            "{} Proving spell",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
+
         let app_cycles = self.app_prover.prove(
             app_binaries,
             tx,
@@ -438,12 +447,42 @@ impl Prove for Prover {
             &mut stdin,
         )?;
 
+        println!(
+            "{} Proof obtained 1",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
+
         let (pk, _) = self.sp1_client.get().setup(SPELL_CHECKER_BINARY);
-        let (proof, spell_cycles) =
-            self.sp1_client
-                .get()
-                .prove(&pk, &stdin, SP1ProofMode::Groth16)?;
-        let proof = proof.bytes().into_boxed_slice();
+
+        let (proof, spell_cycles): (Box<[u8]>, u64);
+
+        #[cfg(not(feature = "mock"))]
+        {
+            let (real_proof, real_spell_cycles) =
+                self.sp1_client
+                    .get()
+                    .prove(&pk, &stdin, SP1ProofMode::Groth16)?;
+            proof = real_proof.bytes().into_boxed_slice();
+            spell_cycles = real_spell_cycles;
+        }
+
+        #[cfg(feature = "mock")]
+        {
+            let mock_proof: Box<[u8]> = Vec::new().into_boxed_slice(); // Placeholder for mock proof
+            proof = mock_proof; // Use mock proof in non-mock builds
+            spell_cycles = 0;
+        }
+
+        println!(
+            "{} Proof obtained 2",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
 
         let mut norm_spell2 = norm_spell;
         norm_spell2.tx.ins = None;

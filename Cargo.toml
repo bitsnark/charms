@@ -47,6 +47,7 @@ twirp = { package = "twirp-rs", version = "0.13.0-succinct" }
 
 [features]
 prover = ["sp1-sdk/native-gnark", "sp1-prover/native-gnark"]
+mock = []
 none = []
 
 [dev-dependencies]

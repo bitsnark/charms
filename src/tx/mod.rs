@@ -11,12 +11,25 @@ pub mod cardano_tx;
 
 #[tracing::instrument(level = "debug", skip_all)]
 pub fn norm_spell(tx: &Tx) -> Option<NormalizedSpell> {
-    charms_client::tx::extract_and_verify_spell(SPELL_VK, tx)
-        .map_err(|e| {
-            tracing::debug!("spell verification failed: {:?}", e);
-            e
-        })
-        .ok()
+    #[cfg(not(feature = "mock"))]
+    {
+        charms_client::tx::extract_and_verify_spell(SPELL_VK, tx)
+            .map_err(|e| {
+                tracing::debug!("spell verification failed: {:?}", e);
+                e
+            })
+            .ok()
+    }
+
+    #[cfg(feature = "mock")]
+    {
+        charms_client::tx::extract_spell(SPELL_VK, tx)
+            .map_err(|e| {
+                tracing::debug!("spell verification failed: {:?}", e);
+                e
+            })
+            .ok()
+    }
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
