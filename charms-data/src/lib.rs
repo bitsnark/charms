@@ -598,6 +598,7 @@ pub fn nft_state_preserved(app: &App, tx: &Transaction) -> bool {
 }
 
 /// Deprecated. Use [charm_values] instead.
+#[deprecated(since = "0.7.0", note = "use `charm_values` instead")]
 pub fn app_datas<'a>(
     app: &'a App,
     strings_of_charms: impl Iterator<Item = &'a Charms>,
