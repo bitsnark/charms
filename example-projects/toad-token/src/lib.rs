@@ -1,5 +1,5 @@
 use charms_sdk::data::{
-    app_datas, check, sum_token_amount, App, Data, Transaction, UtxoId, B32, NFT, TOKEN,
+    charm_values, check, sum_token_amount, App, Data, Transaction, UtxoId, B32, NFT, TOKEN,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -48,7 +48,7 @@ fn can_mint_nft(nft_app: &App, tx: &Transaction, w: &Data) -> bool {
     let w_utxo_id = UtxoId::from_str(&w_str).unwrap();
     check!(tx.ins.iter().any(|(utxo_id, _)| utxo_id == &w_utxo_id));
 
-    let nft_charms = app_datas(nft_app, tx.outs.iter()).collect::<Vec<_>>();
+    let nft_charms = charm_values(nft_app, tx.outs.iter()).collect::<Vec<_>>();
 
     // can mint exactly one NFT.
     check!(nft_charms.len() == 1);
@@ -75,7 +75,7 @@ fn can_mint_token(token_app: &App, tx: &Transaction) -> bool {
     };
 
     let Some(nft_content): Option<NftContent> =
-        app_datas(&nft_app, tx.ins.values()).find_map(|data| data.value().ok())
+        charm_values(&nft_app, tx.ins.values()).find_map(|data| data.value().ok())
     else {
         eprintln!("could not determine incoming remaining supply");
         return false;
@@ -83,7 +83,7 @@ fn can_mint_token(token_app: &App, tx: &Transaction) -> bool {
     let incoming_supply = nft_content.remaining;
 
     let Some(nft_content): Option<NftContent> =
-        app_datas(&nft_app, tx.outs.iter()).find_map(|data| data.value().ok())
+        charm_values(&nft_app, tx.outs.iter()).find_map(|data| data.value().ok())
     else {
         eprintln!("could not determine outgoing remaining supply");
         return false;

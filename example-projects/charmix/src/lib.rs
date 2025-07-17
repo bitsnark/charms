@@ -1,4 +1,4 @@
-use charms_sdk::data::{app_datas, check, App, Data, Transaction, UtxoId, B32, NFT};
+use charms_sdk::data::{charm_values, check, App, Data, Transaction, UtxoId, B32, NFT};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -43,7 +43,7 @@ fn can_mint_nft(nft_app: &App, tx: &Transaction, w: &Data) -> bool {
     let w_utxo_id = UtxoId::from_str(&w_str).unwrap();
     check!(tx.ins.iter().any(|(utxo_id, _)| utxo_id == &w_utxo_id));
 
-    let nft_charms = app_datas(nft_app, tx.outs.iter()).collect::<Vec<_>>();
+    let nft_charms = charm_values(nft_app, tx.outs.iter()).collect::<Vec<_>>();
 
     // can mint exactly one NFT.
     check!(nft_charms.len() == 1);

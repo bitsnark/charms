@@ -597,7 +597,17 @@ pub fn nft_state_preserved(app: &App, tx: &Transaction) -> bool {
     nft_states_in == nft_states_out
 }
 
+/// Deprecated. Use [charm_values] instead.
 pub fn app_datas<'a>(
+    app: &'a App,
+    strings_of_charms: impl Iterator<Item = &'a Charms>,
+) -> impl Iterator<Item = &'a Data> {
+    charm_values(app, strings_of_charms)
+}
+
+/// Iterate over all charm values of a given app (charm key) in the given outputs
+/// (strings of charms).
+pub fn charm_values<'a>(
     app: &'a App,
     strings_of_charms: impl Iterator<Item = &'a Charms>,
 ) -> impl Iterator<Item = &'a Data> {
