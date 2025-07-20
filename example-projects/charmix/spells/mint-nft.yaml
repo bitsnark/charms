@@ -3,9 +3,6 @@ version: 5
 apps:
   $00: n/${app_id}/${app_vk}
 
-private_inputs:
-  $00: "${in_utxo_0}"
-
 ins:
   - utxo_id: ${in_utxo_0}
     charms: {}

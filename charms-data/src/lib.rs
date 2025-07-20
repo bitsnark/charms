@@ -48,9 +48,9 @@ macro_rules! check {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Transaction {
     /// Input UTXOs.
-    pub ins: BTreeMap<UtxoId, Charms>,
+    pub ins: Vec<(UtxoId, Charms)>,
     /// Reference UTXOs.
-    pub refs: BTreeMap<UtxoId, Charms>,
+    pub refs: Vec<(UtxoId, Charms)>,
     /// Output charms.
     pub outs: Vec<Charms>,
 }
@@ -580,7 +580,7 @@ pub fn is_simple_transfer(app: &App, tx: &Transaction) -> bool {
 /// outputs.
 pub fn token_amounts_balanced(app: &App, tx: &Transaction) -> bool {
     match (
-        sum_token_amount(app, tx.ins.values()),
+        sum_token_amount(app, tx.ins.iter().map(|(_, v)| v)),
         sum_token_amount(app, tx.outs.iter()),
     ) {
         (Ok(amount_in), Ok(amount_out)) => amount_in == amount_out,
@@ -591,7 +591,7 @@ pub fn token_amounts_balanced(app: &App, tx: &Transaction) -> bool {
 /// Check if the NFT states are preserved in the transaction. This means that the NFTs (created by
 /// the provided `app`) in the `tx` inputs are the same as the NFTs in the `tx` outputs.
 pub fn nft_state_preserved(app: &App, tx: &Transaction) -> bool {
-    let nft_states_in = app_state_multiset(app, tx.ins.values());
+    let nft_states_in = app_state_multiset(app, tx.ins.iter().map(|(_, v)| v));
     let nft_states_out = app_state_multiset(app, tx.outs.iter());
 
     nft_states_in == nft_states_out

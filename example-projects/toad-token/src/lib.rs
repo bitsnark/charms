@@ -75,7 +75,7 @@ fn can_mint_token(token_app: &App, tx: &Transaction) -> bool {
     };
 
     let Some(nft_content): Option<NftContent> =
-        charm_values(&nft_app, tx.ins.values()).find_map(|data| data.value().ok())
+        charm_values(&nft_app, tx.ins.iter().map(|(_, v)| v)).find_map(|data| data.value().ok())
     else {
         eprintln!("could not determine incoming remaining supply");
         return false;
@@ -95,7 +95,8 @@ fn can_mint_token(token_app: &App, tx: &Transaction) -> bool {
         return false;
     }
 
-    let Some(input_token_amount) = sum_token_amount(&token_app, tx.ins.values()).ok() else {
+    let Some(input_token_amount) = sum_token_amount(&token_app, tx.ins.iter().map(|(_, v)| v)).ok()
+    else {
         eprintln!("could not determine input total token amount");
         return false;
     };

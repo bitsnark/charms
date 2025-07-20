@@ -113,7 +113,7 @@ impl Spell {
         Ok(Transaction { ins, refs, outs })
     }
 
-    fn strings_of_charms(&self, inputs: &Vec<Input>) -> anyhow::Result<BTreeMap<UtxoId, Charms>> {
+    fn strings_of_charms(&self, inputs: &Vec<Input>) -> anyhow::Result<Vec<(UtxoId, Charms)>> {
         inputs
             .iter()
             .map(|input| {
