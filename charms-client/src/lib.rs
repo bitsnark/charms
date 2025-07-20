@@ -52,7 +52,8 @@ pub struct NormalizedTransaction {
     pub ins: Option<Vec<UtxoId>>,
 
     /// Reference UTXO list. **May** be empty.
-    pub refs: BTreeSet<UtxoId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refs: Option<Vec<UtxoId>>,
 
     /// Output charms. **Must** be in the order of the transaction outputs.
     /// When proving spell correctness, we can't know the transaction ID yet.
@@ -61,7 +62,7 @@ pub struct NormalizedTransaction {
     /// **Must not** be larger than the number of outputs in the hosting transaction.
     pub outs: Vec<NormalizedCharms>,
 
-    /// Optional mapping from the beamed output index to the destination UtxoId.
+    /// Optional mapping from the beamed output index to the destination UtxoId hash.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub beamed_outs: Option<BTreeMap<u32, B32>>,
 }
@@ -160,7 +161,12 @@ pub fn well_formed(
     };
     check!(
         tx_ins.iter().all(directly_created_by_prev_txns)
-            && spell.tx.refs.iter().all(directly_created_by_prev_txns)
+            && spell
+                .tx
+                .refs
+                .iter()
+                .flatten()
+                .all(directly_created_by_prev_txns)
     );
     let beamed_source_utxos_point_to_placeholder_dest_utxos = tx_ins_beamed_source_utxos
         .iter()
@@ -232,7 +238,7 @@ pub fn to_tx(
     };
     Transaction {
         ins: tx_ins.iter().map(from_utxo_id).collect(),
-        refs: spell.tx.refs.iter().map(from_utxo_id).collect(),
+        refs: spell.tx.refs.iter().flatten().map(from_utxo_id).collect(),
         outs: spell.tx.outs.iter().map(from_normalized_charms).collect(),
     }
 }

@@ -168,13 +168,15 @@ impl Spell {
         );
         let ins = Some(ins);
 
-        let empty_vec = vec![];
-        let self_refs = self.refs.as_ref().unwrap_or(&empty_vec);
-        let refs: BTreeSet<UtxoId> = self_refs
-            .iter()
-            .map(|utxo| utxo.utxo_id.clone().ok_or(anyhow!("missing input utxo_id")))
-            .collect::<Result<_, _>>()?;
-        ensure!(refs.len() == self_refs.len(), "duplicate reference inputs");
+        let refs = self
+            .refs
+            .as_ref()
+            .map(|refs| {
+                refs.iter()
+                    .map(|utxo| utxo.utxo_id.clone().ok_or(anyhow!("missing input utxo_id")))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?;
 
         let empty_charm = KeyedCharms::new();
 
@@ -275,20 +277,15 @@ impl Spell {
             })
             .collect();
 
-        let refs = match norm_spell
-            .tx
-            .refs
-            .iter()
-            .map(|utxo_id| Input {
-                utxo_id: Some(utxo_id.clone()),
-                charms: None,
-                beamed_from: None,
-            })
-            .collect::<Vec<_>>()
-        {
-            refs if refs.is_empty() => None,
-            refs => Some(refs),
-        };
+        let refs = norm_spell.tx.refs.as_ref().map(|refs| {
+            refs.iter()
+                .map(|utxo_id| Input {
+                    utxo_id: Some(utxo_id.clone()),
+                    charms: None,
+                    beamed_from: None,
+                })
+                .collect::<Vec<_>>()
+        });
 
         let outs = norm_spell
             .tx
