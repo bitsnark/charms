@@ -11,7 +11,7 @@ pub const APP_CHECKER_BINARY: &[u8] = include_bytes!("./bin/charms-app-checker")
 pub const SPELL_CHECKER_BINARY: &[u8] = include_bytes!("./bin/charms-spell-checker");
 
 /// Verification key for the `charms-spell-checker` binary.
-pub const SPELL_VK: &str = "0x001bb82ba778914c8d1bfa381b8c47b327bd9ff15566745af06573e1d07af01d";
+pub const SPELL_VK: &str = "0x002013e91cc4999818f9de422e1bc0e53389eb079626773a76e1d38726afa213";
 
 #[cfg(test)]
 mod test {

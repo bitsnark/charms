@@ -6051,8 +6051,8 @@ dependencies = [
 
 [[package]]
 name = "wasmi"
-version = "0.47.0"
-source = "git+https://github.com/imikushin/wasmi?branch=rust-1.85#92e4c355310a91c74eb7a6225698c3572f443d6e"
+version = "0.48.0"
+source = "git+https://github.com/imikushin/wasmi?branch=rust-1.85#15743e7e61bddcf7d6e4efe022602a94a783e195"
 dependencies = [
  "arrayvec",
  "multi-stash",
@@ -6066,24 +6066,24 @@ dependencies = [
 
 [[package]]
 name = "wasmi_collections"
-version = "0.47.0"
-source = "git+https://github.com/imikushin/wasmi?branch=rust-1.85#92e4c355310a91c74eb7a6225698c3572f443d6e"
+version = "0.48.0"
+source = "git+https://github.com/imikushin/wasmi?branch=rust-1.85#15743e7e61bddcf7d6e4efe022602a94a783e195"
 dependencies = [
  "string-interner",
 ]
 
 [[package]]
 name = "wasmi_core"
-version = "0.47.0"
-source = "git+https://github.com/imikushin/wasmi?branch=rust-1.85#92e4c355310a91c74eb7a6225698c3572f443d6e"
+version = "0.48.0"
+source = "git+https://github.com/imikushin/wasmi?branch=rust-1.85#15743e7e61bddcf7d6e4efe022602a94a783e195"
 dependencies = [
  "libm",
 ]
 
 [[package]]
 name = "wasmi_ir"
-version = "0.47.0"
-source = "git+https://github.com/imikushin/wasmi?branch=rust-1.85#92e4c355310a91c74eb7a6225698c3572f443d6e"
+version = "0.48.0"
+source = "git+https://github.com/imikushin/wasmi?branch=rust-1.85#15743e7e61bddcf7d6e4efe022602a94a783e195"
 dependencies = [
  "wasmi_core",
 ]
