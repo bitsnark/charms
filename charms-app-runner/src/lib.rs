@@ -15,8 +15,8 @@ pub struct AppRunner {
 
 #[derive(Clone)]
 struct HostState {
-    stdin: Arc<Mutex<Vec<u8>>>,  // Stdin buffer
-    stderr: Arc<Mutex<Vec<u8>>>, // Stderr buffer
+    stdin: Arc<Mutex<Vec<u8>>>,    // Stdin buffer
+    stderr: Arc<Mutex<dyn Write>>, // Stderr buffer
 }
 
 // Helper functions for memory access
@@ -152,7 +152,7 @@ fn fd_write_impl(
     {
         let state = caller.data_mut();
         let mut stderr = state.stderr.lock().unwrap();
-        stderr.extend_from_slice(&all_data);
+        stderr.write_all(&all_data)?;
     }
 
     // Write number of bytes written to nwritten
@@ -182,6 +182,50 @@ fn fd_read(caller: Caller<'_, HostState>, fd: i32, iovs: i32, iovs_len: i32, nre
     })
 }
 
+fn environ_sizes_get_impl(
+    mut caller: Caller<'_, HostState>,
+    environc_ptr: i32,
+    environ_buf_size_ptr: i32,
+) -> Result<i32> {
+    let memory = caller
+        .get_export("memory")
+        .and_then(Extern::into_memory)
+        .ok_or_else(|| anyhow::anyhow!("No memory export"))?;
+
+    // Write 0 for number of environment variables
+    write_i32(&memory, &mut caller, environc_ptr, 0)?;
+    // Write 0 for total buffer size needed
+    write_i32(&memory, &mut caller, environ_buf_size_ptr, 0)?;
+
+    Ok(0) // Success
+}
+
+fn environ_get_impl(
+    _caller: Caller<'_, HostState>,
+    _environ_ptr: i32,
+    _environ_buf_ptr: i32,
+) -> Result<i32> {
+    // Nothing to write for empty environment
+    Ok(0) // Success
+}
+
+fn environ_sizes_get(
+    caller: Caller<'_, HostState>,
+    environc_ptr: i32,
+    environ_buf_size_ptr: i32,
+) -> i32 {
+    environ_sizes_get_impl(caller, environc_ptr, environ_buf_size_ptr).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        -1
+    })
+}
+
+fn environ_get(caller: Caller<'_, HostState>, environ_ptr: i32, environ_buf_ptr: i32) -> i32 {
+    environ_get_impl(caller, environ_ptr, environ_buf_ptr).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        -1
+    })
+}
 const MAX_FUEL_PER_RUN: u64 = 1000000000;
 
 impl AppRunner {
@@ -213,7 +257,7 @@ impl AppRunner {
 
         let state = HostState {
             stdin: Arc::new(Mutex::new(stdin_content)),
-            stderr: Arc::new(Mutex::new(Vec::new())),
+            stderr: Arc::new(Mutex::new(std::io::stderr())),
         };
 
         let mut store = Store::new(&self.engine, state.clone());
@@ -222,15 +266,11 @@ impl AppRunner {
 
         linker.func_wrap("wasi_snapshot_preview1", "fd_write", fd_write)?;
         linker.func_wrap("wasi_snapshot_preview1", "fd_read", fd_read)?;
-        linker.func_wrap(
-            "wasi_snapshot_preview1",
-            "environ_get",
-            |_: Caller<'_, HostState>, _: i32, _: i32| -> i32 { -1 },
-        )?;
+        linker.func_wrap("wasi_snapshot_preview1", "environ_get", environ_get)?;
         linker.func_wrap(
             "wasi_snapshot_preview1",
             "environ_sizes_get",
-            |_: Caller<'_, HostState>, _: i32, _: i32| -> i32 { -1 },
+            environ_sizes_get,
         )?;
         linker.func_wrap(
             "wasi_snapshot_preview1",
@@ -247,10 +287,9 @@ impl AppRunner {
         };
         let result = main_func.typed::<(), ()>(&store)?.call(&mut store, ());
 
-        let stderr = state.stderr.lock().unwrap();
-        std::io::stderr().write_all(&stderr)?;
+        state.stderr.lock().unwrap().flush()?;
 
-        result?;
+        result.map_err(|e| anyhow::anyhow!("error running wasm: {:?}", e))?;
 
         let fuel_spent = MAX_FUEL_PER_RUN - store.get_fuel()?;
         Ok(fuel_spent)
