@@ -9,7 +9,7 @@ pub mod cardano_tx;
 pub mod tx;
 
 pub const APP_VK: [u32; 8] = [
-    1790835317, 1236527609, 1493666687, 1986352998, 1172406099, 654890899, 1531987757, 1319422001,
+    487454586, 357291639, 225001263, 1885191303, 293126599, 491099374, 3759322, 1460462146,
 ];
 
 /// Verification key for version `0` of the protocol implemented by `charms-spell-checker` binary.
