@@ -1,4 +1,4 @@
-version: 5
+version: 6
 
 apps:
   $01: t/${app_id}/${app_vk}

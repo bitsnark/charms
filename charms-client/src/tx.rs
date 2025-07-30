@@ -1,12 +1,12 @@
 use crate::{
-    bitcoin_tx::BitcoinTx, cardano_tx::CardanoTx, NormalizedSpell, CURRENT_VERSION, V0,
-    V0_SPELL_VK, V1, V1_SPELL_VK, V2, V2_SPELL_VK, V3, V3_SPELL_VK, V4, V4_SPELL_VK,
+    CURRENT_VERSION, NormalizedSpell, V0, V0_SPELL_VK, V1, V1_SPELL_VK, V2, V2_SPELL_VK, V3,
+    V3_SPELL_VK, V4, V4_SPELL_VK, V5, V5_SPELL_VK, bitcoin_tx::BitcoinTx, cardano_tx::CardanoTx,
 };
 use anyhow::bail;
-use charms_data::{util, TxId};
+use charms_data::{TxId, util};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, IfIsHumanReadable};
+use serde_with::{IfIsHumanReadable, serde_as};
 use sp1_primitives::io::SP1PublicValues;
 
 #[enum_dispatch]
@@ -72,6 +72,7 @@ pub fn extract_and_verify_spell(spell_vk: &str, tx: &Tx) -> anyhow::Result<Norma
 pub fn vks(spell_version: u32, spell_vk: &str) -> anyhow::Result<(&str, &[u8])> {
     match spell_version {
         CURRENT_VERSION => Ok((spell_vk, CURRENT_GROTH16_VK_BYTES)),
+        V5 => Ok((V5_SPELL_VK, V5_GROTH16_VK_BYTES)),
         V4 => Ok((V4_SPELL_VK, V4_GROTH16_VK_BYTES)),
         V3 => Ok((V3_SPELL_VK, V3_GROTH16_VK_BYTES)),
         V2 => Ok((V2_SPELL_VK, V2_GROTH16_VK_BYTES)),
@@ -87,12 +88,13 @@ pub const V2_GROTH16_VK_BYTES: &'static [u8] = V1_GROTH16_VK_BYTES;
 pub const V3_GROTH16_VK_BYTES: &'static [u8] = V1_GROTH16_VK_BYTES;
 pub const V4_GROTH16_VK_BYTES: &'static [u8] = include_bytes!("../vk/v4/groth16_vk.bin");
 pub const V5_GROTH16_VK_BYTES: &'static [u8] = V4_GROTH16_VK_BYTES;
-pub const CURRENT_GROTH16_VK_BYTES: &'static [u8] = V5_GROTH16_VK_BYTES;
+pub const V6_GROTH16_VK_BYTES: &'static [u8] = V5_GROTH16_VK_BYTES;
+pub const CURRENT_GROTH16_VK_BYTES: &'static [u8] = V6_GROTH16_VK_BYTES;
 
 pub fn to_sp1_pv<T: Serialize>(spell_version: u32, t: &T) -> SP1PublicValues {
     let mut pv = SP1PublicValues::new();
     match spell_version {
-        CURRENT_VERSION | V4 | V3 | V2 | V1 => {
+        CURRENT_VERSION | V5 | V4 | V3 | V2 | V1 => {
             // we commit to CBOR-encoded tuple `(spell_vk, n_spell)`
             pv.write_slice(util::write(t).unwrap().as_slice());
         }

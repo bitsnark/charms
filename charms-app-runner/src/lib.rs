@@ -1,5 +1,6 @@
-use anyhow::{bail, ensure, Result};
-use charms_data::{is_simple_transfer, util, App, Data, Transaction, B32};
+use anyhow::{Result, bail, ensure};
+use charms_data::{App, B32, Data, Transaction, is_simple_transfer, util};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
@@ -7,6 +8,21 @@ use std::{
     sync::{Arc, Mutex},
 };
 use wasmi::{Caller, Config, Engine, Extern, Linker, Memory, Module, Store};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AppProverInput {
+    pub app_binaries: BTreeMap<B32, Vec<u8>>,
+    pub tx: Transaction,
+    pub app_public_inputs: BTreeMap<App, Data>,
+    pub app_private_inputs: BTreeMap<App, Data>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AppProverOutput {
+    pub tx: Transaction,
+    pub app_public_inputs: BTreeMap<App, Data>,
+    pub cycles: Vec<u64>,
+}
 
 #[derive(Clone)]
 pub struct AppRunner {

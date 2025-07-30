@@ -9,7 +9,7 @@ Build with:
 charms app build
 ```
 
-The resulting RISC-V binary will show up at `./target/charms-app`.
+The resulting Wasm binary will show up at `./target/wasm32-wasip1/release/toad-token.wasm`.
 
 Get the verification key for the app with:
 

@@ -1,10 +1,9 @@
 use crate::{
-    utils::{BoxedSP1Prover, Shared},
     APP_CHECKER_BINARY,
+    utils::{BoxedSP1Prover, Shared},
 };
-use charms_app_runner::AppRunner;
-use charms_client::{AppProverInput, AppProverOutput};
-use charms_data::{util, App, Data, Transaction, B32};
+use charms_app_runner::{AppProverInput, AppProverOutput, AppRunner};
+use charms_data::{App, B32, Data, Transaction, util};
 use sp1_prover::HashableKey;
 use sp1_sdk::{ProverClient, SP1Proof, SP1ProofMode, SP1Stdin};
 use std::{collections::BTreeMap, sync::Arc};

@@ -1,15 +1,17 @@
-use crate::tx::{extract_and_verify_spell, EnchantedTx, Tx};
-use charms_data::{check, App, Charms, Data, Transaction, TxId, UtxoId, B32};
+use crate::tx::{EnchantedTx, Tx, extract_and_verify_spell};
+use charms_data::{App, B32, Charms, Data, Transaction, TxId, UtxoId, check};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+
+pub use charms_app_runner::{AppProverInput, AppProverOutput};
 
 pub mod bitcoin_tx;
 pub mod cardano_tx;
 pub mod tx;
 
 pub const APP_VK: [u32; 8] = [
-    487454586, 357291639, 225001263, 1885191303, 293126599, 491099374, 3759322, 1460462146,
+    773139792, 1871461666, 1172442063, 346922495, 1779450904, 263758648, 121652725, 113479979,
 ];
 
 /// Verification key for version `0` of the protocol implemented by `charms-spell-checker` binary.
@@ -22,6 +24,8 @@ pub const V2_SPELL_VK: &str = "0x00bd312b6026dbe4a2c16da1e8118d4fea31587a4b572b6
 pub const V3_SPELL_VK: &str = "0x0034872b5af38c95fe82fada696b09a448f7ab0928273b7ac8c58ba29db774b9";
 /// Verification key for version `4` of the protocol implemented by `charms-spell-checker` binary.
 pub const V4_SPELL_VK: &str = "0x00c707a155bf8dc18dc41db2994c214e93e906a3e97b4581db4345b3edd837c5";
+/// Verification key for version `5` of the protocol implemented by `charms-spell-checker` binary.
+pub const V5_SPELL_VK: &str = "0x00e98665c417bd2e6e81c449af63b26ed5ad5c400ef55811b592450bf62c67cd";
 
 /// Version `0` of the protocol.
 pub const V0: u32 = 0u32;
@@ -35,9 +39,11 @@ pub const V3: u32 = 3u32;
 pub const V4: u32 = 4u32;
 /// Version `5` of the protocol.
 pub const V5: u32 = 5u32;
+/// Version `6` of the protocol.
+pub const V6: u32 = 6u32;
 
 /// Current version of the protocol.
-pub const CURRENT_VERSION: u32 = V5;
+pub const CURRENT_VERSION: u32 = V6;
 
 /// Maps the index of the charm's app (in [`NormalizedSpell`].`app_public_inputs`) to the charm's
 /// data.
@@ -268,21 +274,6 @@ pub struct SpellProverInput {
     pub tx_ins_beamed_source_utxos: BTreeMap<UtxoId, UtxoId>,
     /// indices of apps in the spell that have contract proofs
     pub app_prover_output: Option<AppProverOutput>, // proof is provided in input stream data
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AppProverInput {
-    pub app_binaries: BTreeMap<B32, Vec<u8>>,
-    pub tx: Transaction,
-    pub app_public_inputs: BTreeMap<App, Data>,
-    pub app_private_inputs: BTreeMap<App, Data>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AppProverOutput {
-    pub tx: Transaction,
-    pub app_public_inputs: BTreeMap<App, Data>,
-    pub cycles: Vec<u64>,
 }
 
 #[cfg(test)]

@@ -10,12 +10,13 @@ license.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 bitcoin = { workspace = true, features = ["serde"] }
-charms-data = { path = "../charms-data", version = "0.7.0" }
+charms-app-runner = { path = "../charms-app-runner", version = "0.8.0" }
+charms-data = { path = "../charms-data", version = "0.8.0" }
 cml-chain = { workspace = true }
 enum_dispatch = { version = "0.3.13" }
 hex = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_with = { version = "3.13.0" }
+serde_with = { version = "3.14.0" }
 sha2 = { workspace = true }
 sp1-primitives = { workspace = true }
 sp1-verifier = { workspace = true }
@@ -23,4 +24,4 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 ciborium = { version = "0.2.2" }
-serde_json = { version = "1.0.140" }
+serde_json = { version = "1.0.141" }

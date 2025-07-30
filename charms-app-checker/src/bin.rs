@@ -1,4 +1,4 @@
-use charms_client::{AppProverInput, AppProverOutput};
+use charms_app_runner::{AppProverInput, AppProverOutput};
 use charms_data::util;
 
 pub fn main() {
