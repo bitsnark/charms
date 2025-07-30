@@ -16,14 +16,14 @@ use crate::{
     utils,
     utils::{BoxedSP1Prover, Shared},
 };
-use bitcoin::{address::NetworkUnchecked, Address};
+use bitcoin::{Address, address::NetworkUnchecked};
 use charms_app_runner::AppRunner;
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use clap_complete::{generate, Shell};
+use clap_complete::{Shell, generate};
 #[cfg(not(feature = "prover"))]
 use reqwest::Client;
 use serde::Serialize;
-use sp1_sdk::{install::try_install_circuit_artifacts, CpuProver, ProverClient};
+use sp1_sdk::{CpuProver, NetworkProver, ProverClient, install::try_install_circuit_artifacts};
 use std::{io, net::IpAddr, path::PathBuf, str::FromStr, sync::Arc};
 use utils::AsyncShared;
 
@@ -414,14 +414,14 @@ fn spell_sp1_client(app_sp1_client: &Arc<Shared<BoxedSP1Prover>>) -> Arc<Shared<
     let name = std::env::var("SPELL_SP1_PROVER").unwrap_or_default();
     match name.as_str() {
         "app" => app_sp1_client.clone(),
-        "env" | "" => Arc::new(Shared::new(sp1_env_client)),
-        _ => unreachable!("Only 'app' or 'env' are supported as SPELL_SP1_PROVER values"),
+        "network" => Arc::new(Shared::new(sp1_network_client)),
+        _ => unreachable!("Only 'app' or 'network' are supported as SPELL_SP1_PROVER values"),
     }
 }
 
 #[tracing::instrument(level = "info")]
 #[cfg(feature = "prover")]
-fn charms_sp1_cuda_client() -> utils::sp1::CudaProver {
+fn charms_sp1_cuda_prover() -> utils::sp1::CudaProver {
     utils::sp1::CudaProver::new(
         sp1_prover::SP1Prover::new(),
         SP1CudaProver::new(gpu_service_url()).unwrap(),
@@ -434,13 +434,18 @@ fn gpu_service_url() -> String {
 }
 
 #[tracing::instrument(level = "info")]
-pub fn sp1_cpu_client() -> CpuProver {
+pub fn sp1_cpu_prover() -> CpuProver {
     ProverClient::builder().cpu().build()
 }
 
-#[tracing::instrument(level = "debug")]
-fn sp1_env_client() -> BoxedSP1Prover {
-    sp1_named_env_client("env")
+#[tracing::instrument(level = "info")]
+pub fn sp1_network_prover() -> NetworkProver {
+    ProverClient::builder().network().build()
+}
+
+#[tracing::instrument(level = "info")]
+pub fn sp1_network_client() -> BoxedSP1Prover {
+    sp1_named_env_client("network")
 }
 
 #[tracing::instrument(level = "debug")]
@@ -452,9 +457,10 @@ fn sp1_named_env_client(name: &str) -> BoxedSP1Prover {
     };
     match name {
         #[cfg(feature = "prover")]
-        "cuda" => Box::new(charms_sp1_cuda_client()),
-        "cpu" => Box::new(sp1_cpu_client()),
-        _ => Box::new(ProverClient::from_env()),
+        "cuda" => Box::new(charms_sp1_cuda_prover()),
+        "cpu" => Box::new(sp1_cpu_prover()),
+        "network" => Box::new(sp1_network_prover()),
+        _ => unimplemented!("only 'cuda', 'cpu' and 'network' are supported as prover values"),
     }
 }
 
