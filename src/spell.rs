@@ -439,13 +439,19 @@ impl Prove for Prover {
                 .as_secs()
         );
 
-        let app_cycles = self.app_prover.prove(
-            app_binaries,
-            tx,
-            app_public_inputs,
-            app_private_inputs,
-            &mut stdin,
-        )?;
+        let app_cycles;
+        if std::env::var("USE_MOCK_PROOF").ok() == Some("true".to_string()) {
+            println!("Using mock proof! - avoid proving");
+            app_cycles = 0;
+        } else {
+            app_cycles = self.app_prover.prove(
+                app_binaries,
+                tx,
+                app_public_inputs,
+                app_private_inputs,
+                &mut stdin,
+            )?;
+        }
 
         println!(
             "{} Proof obtained 1",
