@@ -24,13 +24,19 @@ pub struct SpellCli {
 
 impl SpellCli {
     pub(crate) fn print_vk(&self, mock: bool) -> Result<()> {
+        #[cfg(feature = "prover")]
+        let is_prover = true;
+        #[cfg(not(feature = "prover"))]
+        let is_prover = false;
         let json = match mock {
             true => json!({
                 "mock": true,
+                "prover": is_prover,
                 "version": CURRENT_VERSION,
                 "vk": SPELL_VK.to_string(),
             }),
             false => json!({
+                "prover": is_prover,
                 "version": CURRENT_VERSION,
                 "vk": SPELL_VK.to_string(),
             }),
