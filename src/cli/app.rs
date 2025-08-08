@@ -1,7 +1,7 @@
 pub(crate) use crate::{app::Prover, spell::Spell};
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{Result, anyhow, ensure};
 use charms_app_runner::AppRunner;
-use charms_data::{Data, B32};
+use charms_data::{B32, Data};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,

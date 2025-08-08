@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub use charms_app_runner::{AppProverInput, AppProverOutput};
 
+pub mod ark;
 pub mod bitcoin_tx;
 pub mod cardano_tx;
 pub mod tx;
@@ -13,6 +14,8 @@ pub mod tx;
 pub const APP_VK: [u32; 8] = [
     773139792, 1871461666, 1172442063, 346922495, 1779450904, 263758648, 121652725, 113479979,
 ];
+
+pub const MOCK_SPELL_VK: &str = "7c38e8639a2eac0074cee920982b92376513e8940f4a7ca6859f17a728af5b0e";
 
 /// Verification key for version `0` of the protocol implemented by `charms-spell-checker` binary.
 pub const V0_SPELL_VK: &str = "0x00e9398ac819e6dd281f81db3ada3fe5159c3cc40222b5ddb0e7584ed2327c5d";
@@ -84,7 +87,7 @@ impl NormalizedTransaction {
 }
 
 /// Proof of spell correctness.
-pub type Proof = Box<[u8]>;
+pub type Proof = Vec<u8>;
 
 /// Normalized representation of a spell.
 /// Can be committed as public input.
@@ -96,6 +99,9 @@ pub struct NormalizedSpell {
     pub tx: NormalizedTransaction,
     /// Maps all `App`s in the transaction to (potentially empty) public input data.
     pub app_public_inputs: BTreeMap<App, Data>,
+    /// Is this a mock spell?
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub mock: bool,
 }
 
 pub fn utxo_id_hash(utxo_id: &UtxoId) -> B32 {
@@ -108,6 +114,7 @@ pub fn utxo_id_hash(utxo_id: &UtxoId) -> B32 {
 pub fn prev_spells(
     prev_txs: &Vec<Tx>,
     spell_vk: &str,
+    mock: bool,
 ) -> BTreeMap<TxId, (Option<NormalizedSpell>, usize)> {
     prev_txs
         .iter()
@@ -116,7 +123,7 @@ pub fn prev_spells(
             (
                 tx_id,
                 (
-                    extract_and_verify_spell(spell_vk, tx)
+                    extract_and_verify_spell(spell_vk, tx, mock)
                         .map_err(|e| {
                             tracing::info!("no correct spell in tx {}: {}", tx_id, e);
                         })

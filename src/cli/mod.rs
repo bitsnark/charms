@@ -12,7 +12,7 @@ use crate::{
         spell::{Check, Prove, SpellCli},
         wallet::{List, WalletCli},
     },
-    spell::{CharmsFee, Prover},
+    spell::{CharmsFee, MockProver, ProveSpellTxImpl, Prover},
     utils,
     utils::{BoxedSP1Prover, Shared},
 };
@@ -25,7 +25,6 @@ use reqwest::Client;
 use serde::Serialize;
 use sp1_sdk::{CpuProver, NetworkProver, ProverClient, install::try_install_circuit_artifacts};
 use std::{io, net::IpAddr, path::PathBuf, str::FromStr, sync::Arc};
-use utils::AsyncShared;
 
 pub const BITCOIN: &str = "bitcoin";
 pub const CARDANO: &str = "cardano";
@@ -46,23 +45,6 @@ pub struct ServerConfig {
     /// Port to listen on, defaults to 17784.
     #[arg(long, default_value = "17784")]
     port: u16,
-
-    /// bitcoind RPC URL. Set via RPC_URL env var.
-    #[arg(long, env, default_value = "http://localhost:48332")]
-    #[cfg(not(feature = "prover"))]
-    rpc_url: String,
-
-    /// bitcoind RPC user. Recommended to set via RPC_USER env var.
-    #[arg(long, env, default_value = "hello")]
-    #[cfg(not(feature = "prover"))]
-    rpc_user: String,
-
-    /// bitcoind RPC password. Recommended to set via RPC_PASSWORD env var.
-    /// Use the .cookie file in the bitcoind data directory to look up the password:
-    /// the format is `__cookie__:password`.
-    #[arg(long, env, default_value = "world")]
-    #[cfg(not(feature = "prover"))]
-    rpc_password: String,
 }
 
 #[derive(Subcommand)]
@@ -146,6 +128,10 @@ pub struct SpellProveParams {
     /// Target chain, defaults to `bitcoin`.
     #[arg(long, default_value = "bitcoin")]
     chain: String,
+
+    /// Is mock mode enabled?
+    #[arg(long, default_value = "false", hide_env = true)]
+    mock: bool,
 }
 
 #[derive(Args)]
@@ -164,9 +150,16 @@ pub struct SpellCheckParams {
     #[arg(long, value_delimiter = ',')]
     prev_txs: Option<Vec<String>>,
 
-    /// Target chain, defaults to `bitcoin`. Can be `bitcoin` or `cardano`.
-    #[arg(long, default_value = "bitcoin")]
-    chain: String,
+    /// Is mock mode enabled?
+    #[arg(long, default_value = "false", hide_env = true)]
+    mock: bool,
+}
+
+#[derive(Args)]
+pub struct SpellVkParams {
+    /// Is mock mode enabled?
+    #[arg(long, default_value = "false", hide_env = true)]
+    mock: bool,
 }
 
 #[derive(Subcommand)]
@@ -176,25 +169,32 @@ pub enum SpellCommands {
     /// Prove the spell is correct.
     Prove(#[command(flatten)] SpellProveParams),
     /// Print the current protocol version and spell VK (verification key) in JSON.
-    Vk,
+    Vk(#[command(flatten)] SpellVkParams),
+}
+
+#[derive(Args)]
+pub struct ShowSpellParams {
+    #[arg(long, default_value = "bitcoin")]
+    chain: String,
+
+    /// Hex-encoded transaction.
+    #[arg(long)]
+    tx: String,
+
+    /// Output in JSON format (default is YAML).
+    #[arg(long)]
+    json: bool,
+
+    /// Is mock mode enabled?
+    #[arg(long, default_value = "false", hide_env = true)]
+    mock: bool,
 }
 
 #[derive(Subcommand)]
 pub enum TxCommands {
     /// Show the spell in a transaction. If the transaction has a spell and its valid proof, it
     /// will be printed to stdout.
-    ShowSpell {
-        #[arg(long, default_value = "bitcoin")]
-        chain: String,
-
-        /// Hex-encoded transaction.
-        #[arg(long)]
-        tx: String,
-
-        /// Output in JSON format (default is YAML).
-        #[arg(long)]
-        json: bool,
-    },
+    ShowSpell(#[command(flatten)] ShowSpellParams),
 }
 
 #[derive(Subcommand)]
@@ -236,35 +236,10 @@ pub struct WalletListParams {
     /// Output in JSON format (default is YAML)
     #[arg(long)]
     json: bool,
-}
 
-#[derive(Args)]
-pub struct SpellCastParams {
-    /// Path to spell source file (YAML/JSON).
-    #[arg(long, default_value = "/dev/stdin")]
-    spell: PathBuf,
-
-    /// Path to the apps' RISC-V binaries.
-    #[arg(long, value_delimiter = ',')]
-    app_bins: Vec<PathBuf>,
-
-    /// Funding UTXO ID (`txid:vout`).
-    #[arg(long, alias = "funding-utxo-id")]
-    funding_utxo: String,
-
-    /// Fee rate: in sats/vB for Bitcoin.
-    #[arg(long, default_value = "2.0")]
-    fee_rate: f64,
-
-    /// Target chain, defaults to `bitcoin`.
-    #[arg(long, default_value = "bitcoin")]
-    chain: String,
-
-    /// Pre-requisite transactions (hex-encoded) separated by commas (`,`).
-    /// These are the transactions that create the UTXOs that the `tx` (and the spell) spends.
-    /// If the spell has any reference UTXOs, the transactions creating them must also be included.
-    #[arg(long, value_delimiter = ',')]
-    prev_txs: Option<Vec<String>>,
+    /// Is mock mode enabled?
+    #[arg(long, default_value = "false", hide_env = true)]
+    mock: bool,
 }
 
 #[derive(Subcommand)]
@@ -288,11 +263,11 @@ pub async fn run() -> anyhow::Result<()> {
             match command {
                 SpellCommands::Check(params) => spell_cli.check(params),
                 SpellCommands::Prove(params) => spell_cli.prove(params).await,
-                SpellCommands::Vk => spell_cli.print_vk(),
+                SpellCommands::Vk(params) => spell_cli.print_vk(params.mock),
             }
         }
         Commands::Tx { command } => match command {
-            TxCommands::ShowSpell { chain, tx, json } => tx::tx_show_spell(chain, tx, json),
+            TxCommands::ShowSpell(params) => tx::tx_show_spell(params),
         },
         Commands::App { command } => match command {
             AppCommands::New { name } => app::new(&name),
@@ -317,24 +292,20 @@ pub async fn run() -> anyhow::Result<()> {
 }
 
 fn server(server_config: ServerConfig) -> Server {
-    let prover = AsyncShared::new(spell_prover);
+    let prover = spell_prover(false);
     Server::new(server_config, prover)
 }
 
 #[tracing::instrument(level = "debug")]
-fn spell_prover() -> Prover {
-    let app_prover = Arc::new(app::Prover {
-        sp1_client: Arc::new(Shared::new(app_sp1_client)),
-        runner: AppRunner::new(),
-    });
-
-    let spell_sp1_client = spell_sp1_client(&app_prover.sp1_client);
-
+fn spell_prover(mock: bool) -> ProveSpellTxImpl {
     let charms_fee_settings = charms_fee_settings();
 
     let charms_prove_api_url = std::env::var("CHARMS_PROVE_API_URL")
         .ok()
         .unwrap_or("https://prove.charms.dev/spells/prove".to_string());
+
+    #[cfg(feature = "prover")]
+    let prover = prove_impl(mock);
 
     #[cfg(not(feature = "prover"))]
     let client = Client::builder()
@@ -345,15 +316,33 @@ fn spell_prover() -> Prover {
         .build()
         .expect("HTTP client should be created successfully");
 
-    let spell_prover = Prover {
-        app_prover: app_prover.clone(),
-        prover_client: spell_sp1_client.clone(),
+    let spell_prover = ProveSpellTxImpl {
         charms_fee_settings,
         charms_prove_api_url,
+        #[cfg(feature = "prover")]
+        prover,
         #[cfg(not(feature = "prover"))]
         client,
     };
     spell_prover
+}
+
+pub fn prove_impl(mock: bool) -> Box<dyn crate::spell::Prove> {
+    let app_prover = Arc::new(app::Prover {
+        sp1_client: Arc::new(Shared::new(app_sp1_client)),
+        runner: AppRunner::new(),
+    });
+    let spell_sp1_client = crate::cli::spell_sp1_client(&app_prover.sp1_client);
+
+    match mock {
+        false => Box::new(Prover {
+            app_prover: app_prover.clone(),
+            prover_client: spell_sp1_client.clone(),
+        }),
+        true => Box::new(MockProver {
+            app_runner: Arc::new(app_prover.runner.clone()),
+        }),
+    }
 }
 
 fn charms_fee_settings() -> Option<CharmsFee> {
@@ -395,11 +384,7 @@ fn charms_fee_base() -> u64 {
 }
 
 fn spell_cli() -> SpellCli {
-    let spell_prover = spell_prover();
-
     let spell_cli = SpellCli {
-        app_prover: spell_prover.app_prover.clone(),
-        spell_prover: Arc::new(spell_prover),
         app_runner: AppRunner::new(),
     };
     spell_cli

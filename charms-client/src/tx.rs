@@ -1,17 +1,23 @@
 use crate::{
-    CURRENT_VERSION, NormalizedSpell, V0, V0_SPELL_VK, V1, V1_SPELL_VK, V2, V2_SPELL_VK, V3,
-    V3_SPELL_VK, V4, V4_SPELL_VK, V5, V5_SPELL_VK, bitcoin_tx::BitcoinTx, cardano_tx::CardanoTx,
+    CURRENT_VERSION, MOCK_SPELL_VK, NormalizedSpell, V0, V0_SPELL_VK, V1, V1_SPELL_VK, V2,
+    V2_SPELL_VK, V3, V3_SPELL_VK, V4, V4_SPELL_VK, V5, V5_SPELL_VK, ark, bitcoin_tx::BitcoinTx,
+    cardano_tx::CardanoTx,
 };
-use anyhow::bail;
+use anyhow::{anyhow, bail};
 use charms_data::{TxId, util};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 use serde_with::{IfIsHumanReadable, serde_as};
 use sp1_primitives::io::SP1PublicValues;
+use sp1_verifier::Groth16Verifier;
 
 #[enum_dispatch]
 pub trait EnchantedTx {
-    fn extract_and_verify_spell(&self, spell_vk: &str) -> anyhow::Result<NormalizedSpell>;
+    fn extract_and_verify_spell(
+        &self,
+        spell_vk: &str,
+        mock: bool,
+    ) -> anyhow::Result<NormalizedSpell>;
     fn tx_outs_len(&self) -> usize;
     fn tx_id(&self) -> TxId;
     fn hex(&self) -> String;
@@ -65,22 +71,47 @@ impl Tx {
 /// Extract a [`NormalizedSpell`] from a transaction and verify it.
 /// Incorrect spells are rejected.
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn extract_and_verify_spell(spell_vk: &str, tx: &Tx) -> anyhow::Result<NormalizedSpell> {
-    tx.extract_and_verify_spell(spell_vk)
+pub fn extract_and_verify_spell(
+    spell_vk: &str,
+    tx: &Tx,
+    mock: bool,
+) -> anyhow::Result<NormalizedSpell> {
+    tx.extract_and_verify_spell(spell_vk, mock)
 }
 
-pub fn vks(spell_version: u32, spell_vk: &str) -> anyhow::Result<(&str, &[u8])> {
+pub fn spell_vk(spell_version: u32, spell_vk: &str, mock: bool) -> anyhow::Result<&str> {
+    if mock {
+        return Ok(MOCK_SPELL_VK);
+    }
     match spell_version {
-        CURRENT_VERSION => Ok((spell_vk, CURRENT_GROTH16_VK_BYTES)),
-        V5 => Ok((V5_SPELL_VK, V5_GROTH16_VK_BYTES)),
-        V4 => Ok((V4_SPELL_VK, V4_GROTH16_VK_BYTES)),
-        V3 => Ok((V3_SPELL_VK, V3_GROTH16_VK_BYTES)),
-        V2 => Ok((V2_SPELL_VK, V2_GROTH16_VK_BYTES)),
-        V1 => Ok((V1_SPELL_VK, V1_GROTH16_VK_BYTES)),
-        V0 => Ok((V0_SPELL_VK, V0_GROTH16_VK_BYTES)),
+        CURRENT_VERSION => Ok(spell_vk),
+        V5 => Ok(V5_SPELL_VK),
+        V4 => Ok(V4_SPELL_VK),
+        V3 => Ok(V3_SPELL_VK),
+        V2 => Ok(V2_SPELL_VK),
+        V1 => Ok(V1_SPELL_VK),
+        V0 => Ok(V0_SPELL_VK),
         _ => bail!("unsupported spell version: {}", spell_version),
     }
 }
+
+pub fn groth16_vk(spell_version: u32, mock: bool) -> anyhow::Result<&'static [u8]> {
+    if mock {
+        return Ok(MOCK_GROTH16_VK_BYTES);
+    }
+    match spell_version {
+        CURRENT_VERSION => Ok(CURRENT_GROTH16_VK_BYTES),
+        V5 => Ok(V5_GROTH16_VK_BYTES),
+        V4 => Ok(V4_GROTH16_VK_BYTES),
+        V3 => Ok(V3_GROTH16_VK_BYTES),
+        V2 => Ok(V2_GROTH16_VK_BYTES),
+        V1 => Ok(V1_GROTH16_VK_BYTES),
+        V0 => Ok(V0_GROTH16_VK_BYTES),
+        _ => bail!("unsupported spell version: {}", spell_version),
+    }
+}
+
+pub const MOCK_GROTH16_VK_BYTES: &'static [u8] = include_bytes!("../vk/mock/mock-groth16-vk.bin");
 
 pub const V0_GROTH16_VK_BYTES: &'static [u8] = include_bytes!("../vk/v0/groth16_vk.bin");
 pub const V1_GROTH16_VK_BYTES: &'static [u8] = include_bytes!("../vk/v1/groth16_vk.bin");
@@ -91,21 +122,36 @@ pub const V5_GROTH16_VK_BYTES: &'static [u8] = V4_GROTH16_VK_BYTES;
 pub const V6_GROTH16_VK_BYTES: &'static [u8] = V5_GROTH16_VK_BYTES;
 pub const CURRENT_GROTH16_VK_BYTES: &'static [u8] = V6_GROTH16_VK_BYTES;
 
-pub fn to_sp1_pv<T: Serialize>(spell_version: u32, t: &T) -> SP1PublicValues {
-    let mut pv = SP1PublicValues::new();
+pub fn to_serialized_pv<T: Serialize>(spell_version: u32, t: &T) -> Vec<u8> {
     match spell_version {
         CURRENT_VERSION | V5 | V4 | V3 | V2 | V1 => {
             // we commit to CBOR-encoded tuple `(spell_vk, n_spell)`
-            pv.write_slice(util::write(t).unwrap().as_slice());
+            util::write(t).unwrap()
         }
         V0 => {
             // we used to commit to the tuple `(spell_vk, n_spell)`, which was serialized internally
             // by SP1
+            let mut pv = SP1PublicValues::new();
             pv.write(t);
+            pv.to_vec()
         }
         _ => unreachable!(),
     }
-    pv
+}
+
+pub fn verify_snark_proof(
+    proof: &[u8],
+    public_inputs: &[u8],
+    vk_hash: &str,
+    spell_version: u32,
+    mock: bool,
+) -> anyhow::Result<()> {
+    let groth16_vk = groth16_vk(spell_version, mock)?;
+    match mock {
+        false => Groth16Verifier::verify(proof, public_inputs, vk_hash, groth16_vk)
+            .map_err(|e| anyhow!("could not verify spell proof: {}", e)),
+        true => ark::verify_groth16_proof(proof, public_inputs, groth16_vk),
+    }
 }
 
 #[cfg(test)]

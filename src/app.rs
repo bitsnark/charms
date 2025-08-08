@@ -5,7 +5,7 @@ use crate::{
 use charms_app_runner::{AppProverInput, AppProverOutput, AppRunner};
 use charms_data::{App, B32, Data, Transaction, util};
 use sp1_prover::HashableKey;
-use sp1_sdk::{ProverClient, SP1Proof, SP1ProofMode, SP1Stdin};
+use sp1_sdk::{SP1Proof, SP1ProofMode, SP1Stdin};
 use std::{collections::BTreeMap, sync::Arc};
 
 pub struct Prover {
@@ -14,15 +14,6 @@ pub struct Prover {
 }
 
 impl Prover {
-    pub fn new() -> Self {
-        Self {
-            sp1_client: Arc::new(Shared::new(|| {
-                Box::new(ProverClient::builder().cpu().build())
-            })),
-            runner: AppRunner::new(),
-        }
-    }
-
     pub(crate) fn prove(
         &self,
         app_binaries: BTreeMap<B32, Vec<u8>>,

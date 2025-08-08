@@ -1,19 +1,19 @@
 use crate::{spell, spell::Spell};
-use anyhow::{anyhow, bail, Error};
+use anyhow::{Error, anyhow, bail};
 use charms_client::{
-    cardano_tx::{tx_hash, tx_id, CardanoTx},
+    cardano_tx::{CardanoTx, tx_hash, tx_id},
     tx::Tx,
 };
 use charms_data::{TxId, UtxoId};
 use cml_chain::{
+    Coin, SetTransactionInput,
     address::Address,
-    fees::{min_no_script_fee, LinearFee},
+    fees::{LinearFee, min_no_script_fee},
     plutus::PlutusData,
     transaction::{
         DatumOption, Transaction, TransactionBody, TransactionInput, TransactionOutput,
         TransactionWitnessSet,
     },
-    Coin, SetTransactionInput,
 };
 use std::collections::BTreeMap;
 

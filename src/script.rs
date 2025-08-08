@@ -1,13 +1,13 @@
 use bitcoin::{
+    ScriptBuf, XOnlyPublicKey,
     constants::MAX_SCRIPT_ELEMENT_SIZE,
     opcodes::{
-        all::{OP_CHECKSIG, OP_ENDIF, OP_IF},
         OP_FALSE,
+        all::{OP_CHECKSIG, OP_ENDIF, OP_IF},
     },
     script::{Builder, PushBytes},
     secp256k1::Secp256k1,
     taproot::{ControlBlock, LeafVersion, TaprootBuilder, TaprootSpendInfo},
-    ScriptBuf, XOnlyPublicKey,
 };
 
 pub fn control_block(public_key: XOnlyPublicKey, script: ScriptBuf) -> ControlBlock {

@@ -2,8 +2,8 @@ pub mod app;
 pub mod bin;
 
 use crate::app::to_public_values;
-use charms_client::{tx::Tx, AppProverOutput, NormalizedSpell, APP_VK};
-use charms_data::{check, is_simple_transfer, UtxoId};
+use charms_client::{APP_VK, AppProverOutput, NormalizedSpell, tx::Tx};
+use charms_data::{UtxoId, check, is_simple_transfer};
 use serde::Serialize;
 use sp1_zkvm::lib::verify::verify_sp1_proof;
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,7 +16,7 @@ pub(crate) fn is_correct(
     spell_vk: &String,
     tx_ins_beamed_source_utxos: &BTreeMap<UtxoId, UtxoId>,
 ) -> bool {
-    let prev_spells = charms_client::prev_spells(prev_txs, spell_vk);
+    let prev_spells = charms_client::prev_spells(prev_txs, spell_vk, false);
 
     check!(charms_client::well_formed(
         spell,

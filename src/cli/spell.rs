@@ -1,17 +1,14 @@
 use crate::{
-    app, cli,
-    cli::{SpellCheckParams, SpellProveParams, BITCOIN, CARDANO},
-    spell,
+    SPELL_VK, cli,
+    cli::{BITCOIN, CARDANO, SpellCheckParams, SpellProveParams, spell_prover},
     spell::{ProveRequest, ProveSpellTx, Spell},
-    tx::{bitcoin_tx, cardano_tx},
-    SPELL_VK,
 };
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use charms_app_runner::AppRunner;
-use charms_client::{tx::Tx, CURRENT_VERSION};
+use charms_client::{CURRENT_VERSION, tx::Tx};
 use charms_data::UtxoId;
 use serde_json::json;
-use std::{future::Future, sync::Arc};
+use std::future::Future;
 
 pub trait Check {
     fn check(&self, params: SpellCheckParams) -> Result<()>;
@@ -22,26 +19,31 @@ pub trait Prove {
 }
 
 pub struct SpellCli {
-    pub app_prover: Arc<app::Prover>,
-    pub spell_prover: Arc<spell::Prover>,
     pub app_runner: AppRunner,
 }
 
 impl SpellCli {
-    pub(crate) fn print_vk(&self) -> Result<()> {
-        let json = json!({
-            "version": CURRENT_VERSION,
-            "vk": SPELL_VK.to_string(),
-        });
+    pub(crate) fn print_vk(&self, mock: bool) -> Result<()> {
+        let json = match mock {
+            true => json!({
+                "mock": true,
+                "version": CURRENT_VERSION,
+                "vk": SPELL_VK.to_string(),
+            }),
+            false => json!({
+                "version": CURRENT_VERSION,
+                "vk": SPELL_VK.to_string(),
+            }),
+        };
+
         println!("{}", json);
         Ok(())
     }
 }
 
 impl Prove for SpellCli {
-    async fn prove(
-        &self,
-        SpellProveParams {
+    async fn prove(&self, params: SpellProveParams) -> Result<()> {
+        let SpellProveParams {
             spell,
             prev_txs,
             app_bins,
@@ -50,8 +52,11 @@ impl Prove for SpellCli {
             change_address,
             fee_rate,
             chain,
-        }: SpellProveParams,
-    ) -> Result<()> {
+            mock,
+        } = params;
+
+        let spell_prover = spell_prover(mock);
+
         // Parse funding UTXO early: to fail fast
         let funding_utxo = UtxoId::from_str(&funding_utxo)?;
 
@@ -61,20 +66,18 @@ impl Prove for SpellCli {
 
         let binaries = cli::app::binaries_by_vk(&self.app_runner, app_bins)?;
 
-        let transactions = self
-            .spell_prover
-            .prove_spell_tx(ProveRequest {
-                spell,
-                binaries,
-                prev_txs,
-                funding_utxo,
-                funding_utxo_value,
-                change_address,
-                fee_rate,
-                charms_fee: None,
-                chain: chain.clone(),
-            })
-            .await?;
+        let prove_request = ProveRequest {
+            spell,
+            binaries,
+            prev_txs,
+            funding_utxo,
+            funding_utxo_value,
+            change_address,
+            fee_rate,
+            charms_fee: None,
+            chain: chain.clone(),
+        };
+        let transactions = spell_prover.prove_spell_tx(prove_request).await?;
 
         match chain.as_str() {
             BITCOIN => {
@@ -110,7 +113,7 @@ impl Check for SpellCli {
             spell,
             app_bins,
             prev_txs,
-            chain,
+            mock,
         }: SpellCheckParams,
     ) -> Result<()> {
         let mut spell: Spell = serde_yaml::from_slice(&std::fs::read(spell)?)?;
@@ -124,28 +127,14 @@ impl Check for SpellCli {
             "all spell inputs must have utxo_id"
         );
 
-        let chain = chain.as_str();
-
-        let tx = match chain {
-            BITCOIN => Tx::Bitcoin(bitcoin_tx::from_spell(&spell)?),
-            CARDANO => Tx::Cardano(cardano_tx::from_spell(&spell)?),
-            _ => unreachable!(),
-        };
-
-        let prev_txs = match prev_txs {
-            Some(prev_txs) => prev_txs,
-            None => match tx {
-                Tx::Bitcoin(tx) => cli::tx::get_prev_txs(&tx.0)?,
-                Tx::Cardano(_) => unimplemented!("prev_txs required for Cardano"),
-            },
-        };
+        let prev_txs = prev_txs.unwrap_or_else(|| vec![]);
 
         let prev_txs = prev_txs
             .iter()
             .map(|tx_hex| Tx::from_hex(tx_hex))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let prev_spells = charms_client::prev_spells(&prev_txs, &SPELL_VK);
+        let prev_spells = charms_client::prev_spells(&prev_txs, &SPELL_VK, mock);
 
         let (norm_spell, app_private_inputs, tx_ins_beamed_source_utxos) = spell.normalized()?;
 

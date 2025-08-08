@@ -5,17 +5,16 @@ use crate::{
 };
 use anyhow::Error;
 use bitcoin::{
-    self,
+    self, Address, Amount, FeeRate, OutPoint, ScriptBuf, TapLeafHash, TapSighashType, Transaction,
+    TxIn, TxOut, Txid, Weight, Witness, XOnlyPublicKey,
     absolute::LockTime,
     hashes::Hash,
     key::Secp256k1,
-    secp256k1::{rand::thread_rng, schnorr, Keypair, Message},
+    secp256k1::{Keypair, Message, rand::thread_rng, schnorr},
     sighash::{Prevouts, SighashCache},
     taproot,
     taproot::LeafVersion,
     transaction::Version,
-    Address, Amount, FeeRate, OutPoint, ScriptBuf, TapLeafHash, TapSighashType, Transaction, TxIn,
-    TxOut, Txid, Weight, Witness, XOnlyPublicKey,
 };
 use charms_client::{bitcoin_tx::BitcoinTx, tx::Tx};
 use charms_data::{TxId, UtxoId};
@@ -282,7 +281,7 @@ pub fn tx_input(ins: &[Input]) -> Vec<TxIn> {
             let utxo_id = u.utxo_id.as_ref().unwrap();
             TxIn {
                 previous_output: OutPoint {
-                    txid: Txid::from_byte_array(utxo_id.0 .0),
+                    txid: Txid::from_byte_array(utxo_id.0.0),
                     vout: utxo_id.1,
                 },
                 script_sig: Default::default(),
@@ -319,7 +318,7 @@ pub fn make_transactions(
 ) -> Result<Vec<Tx>, Error> {
     let change_address = bitcoin::Address::from_str(&change_address)?;
 
-    let funding_utxo = OutPoint::new(Txid::from_byte_array(funding_utxo.0 .0), funding_utxo.1);
+    let funding_utxo = OutPoint::new(Txid::from_byte_array(funding_utxo.0.0), funding_utxo.1);
 
     // Parse change address into ScriptPubkey
     let change_pubkey = change_address.assume_checked().script_pubkey();

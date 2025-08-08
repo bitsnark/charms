@@ -1,4 +1,4 @@
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{Result, anyhow, ensure};
 use ark_std::{
     cmp::Ordering,
     collections::BTreeMap,
@@ -9,10 +9,9 @@ use ark_std::{
 use ciborium::Value;
 use core::{convert::TryInto, fmt};
 use serde::{
-    de,
+    Deserialize, Deserializer, Serialize, Serializer, de,
     de::{DeserializeOwned, SeqAccess, Visitor},
     ser::SerializeTuple,
-    Deserialize, Deserializer, Serialize, Serializer,
 };
 pub mod util;
 
@@ -70,7 +69,7 @@ impl UtxoId {
     /// Convert to a byte array (of 36 bytes).
     pub fn to_bytes(&self) -> [u8; 36] {
         let mut bytes = [0u8; 36];
-        bytes[..32].copy_from_slice(&self.0 .0); // Copy TxId
+        bytes[..32].copy_from_slice(&self.0.0); // Copy TxId
         bytes[32..].copy_from_slice(&self.1.to_le_bytes()); // Copy index as little-endian
         bytes
     }

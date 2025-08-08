@@ -5,8 +5,8 @@ use crate::{
     tx,
     utils::str_index,
 };
-use anyhow::{ensure, Result};
-use bitcoin::{hashes::Hash, Transaction};
+use anyhow::{Result, ensure};
+use bitcoin::{Transaction, hashes::Hash};
 use charms_client::{bitcoin_tx::BitcoinTx, tx::Tx};
 use charms_data::{App, Data, TxId, UtxoId};
 use serde::{Deserialize, Serialize};
@@ -58,19 +58,22 @@ impl List for WalletCli {
         let output = b_cli.wait_with_output()?;
         let b_list_unspent: Vec<BListUnspentItem> = serde_json::from_slice(&output.stdout)?;
 
-        let unspent_charms_outputs = outputs_with_charms(b_list_unspent)?;
+        let unspent_charms_outputs = outputs_with_charms(b_list_unspent, params.mock)?;
 
         cli::print_output(&unspent_charms_outputs, params.json)?;
         Ok(())
     }
 }
 
-fn outputs_with_charms(b_list_unspent: Vec<BListUnspentItem>) -> Result<AppsAndCharmsOutputs> {
+fn outputs_with_charms(
+    b_list_unspent: Vec<BListUnspentItem>,
+    mock: bool,
+) -> Result<AppsAndCharmsOutputs> {
     let txid_set = b_list_unspent
         .iter()
         .map(|item| item.txid.clone())
         .collect::<BTreeSet<_>>();
-    let spells = txs_with_spells(txid_set.into_iter())?;
+    let spells = txs_with_spells(txid_set.into_iter(), mock)?;
     let utxos_with_charms: BTreeMap<UtxoId, (BListUnspentItem, ParsedCharms)> =
         utxos_with_charms(spells, b_list_unspent);
     let apps = collect_apps(&utxos_with_charms);
@@ -81,7 +84,10 @@ fn outputs_with_charms(b_list_unspent: Vec<BListUnspentItem>) -> Result<AppsAndC
     })
 }
 
-fn txs_with_spells(txid_iter: impl Iterator<Item = String>) -> Result<BTreeMap<TxId, Spell>> {
+fn txs_with_spells(
+    txid_iter: impl Iterator<Item = String>,
+    mock: bool,
+) -> Result<BTreeMap<TxId, Spell>> {
     let txs_with_spells = txid_iter
         .map(|txid| {
             let tx: Transaction = get_tx(&txid)?;
@@ -90,7 +96,7 @@ fn txs_with_spells(txid_iter: impl Iterator<Item = String>) -> Result<BTreeMap<T
         .map(|tx_result: Result<Transaction>| {
             let tx = tx_result?;
             let txid = tx.compute_txid();
-            let spell_opt = tx::spell(&Tx::Bitcoin(BitcoinTx(tx)));
+            let spell_opt = tx::spell(&Tx::Bitcoin(BitcoinTx(tx)), mock);
             Ok(spell_opt.map(|spell| (TxId(txid.to_byte_array()), spell)))
         })
         .filter_map(|tx_result| match tx_result {

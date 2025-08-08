@@ -1,6 +1,6 @@
 use std::{
     mem::ManuallyDrop,
-    sync::{mpsc, Mutex},
+    sync::{Mutex, mpsc},
 };
 
 pub struct Pool<T> {

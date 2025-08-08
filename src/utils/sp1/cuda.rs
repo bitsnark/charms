@@ -3,9 +3,8 @@ use async_trait::async_trait;
 use reqwest::{Request, Response};
 use sp1_core_machine::{io::SP1Stdin, reduce::SP1ReduceProof, utils::SP1CoreProverError};
 use sp1_cuda::{
-    block_on,
+    CompressRequestPayload, StatelessProveCoreRequestPayload, block_on,
     proto::api::{ProverServiceClient, ReadyRequest},
-    CompressRequestPayload, StatelessProveCoreRequestPayload,
 };
 use sp1_prover::{InnerSC, SP1CoreProof, SP1ProvingKey, SP1RecursionProverError, SP1VerifyingKey};
 use std::{
@@ -15,10 +14,9 @@ use std::{
     time::{Duration, Instant},
 };
 use twirp::{
-    async_trait,
+    Client, Middleware, Next, async_trait,
     reqwest::{self},
     url::Url,
-    Client, Middleware, Next,
 };
 
 /// A remote client to [sp1_prover::SP1Prover] that runs inside a container.

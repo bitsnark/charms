@@ -1,7 +1,7 @@
-use crate::{spell::Spell, SPELL_VK};
+use crate::{SPELL_VK, spell::Spell};
 use charms_client::{
-    tx::{EnchantedTx, Tx},
     NormalizedSpell,
+    tx::{EnchantedTx, Tx},
 };
 use charms_data::TxId;
 use std::collections::BTreeMap;
@@ -10,8 +10,8 @@ pub mod bitcoin_tx;
 pub mod cardano_tx;
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn norm_spell(tx: &Tx) -> Option<NormalizedSpell> {
-    charms_client::tx::extract_and_verify_spell(SPELL_VK, tx)
+pub fn norm_spell(tx: &Tx, mock: bool) -> Option<NormalizedSpell> {
+    charms_client::tx::extract_and_verify_spell(SPELL_VK, tx, mock)
         .map_err(|e| {
             tracing::debug!("spell verification failed: {:?}", e);
             e
@@ -20,8 +20,8 @@ pub fn norm_spell(tx: &Tx) -> Option<NormalizedSpell> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn spell(tx: &Tx) -> Option<Spell> {
-    match norm_spell(tx) {
+pub fn spell(tx: &Tx, mock: bool) -> Option<Spell> {
+    match norm_spell(tx, mock) {
         Some(norm_spell) => Some(Spell::denormalized(&norm_spell)),
         None => None,
     }

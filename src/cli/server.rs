@@ -1,15 +1,14 @@
 use crate::{
     cli::ServerConfig,
-    spell::{ProveRequest, ProveSpellTx, Prover, Spell},
+    spell::{ProveRequest, ProveSpellTx, ProveSpellTxImpl, Spell},
     tx::norm_spell,
-    utils::AsyncShared,
 };
 use anyhow::Result;
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::StatusCode,
     routing::{get, post, put},
-    Json, Router,
 };
 use charms_client::tx::{EnchantedTx, Tx};
 use charms_data::TxId;
@@ -19,7 +18,7 @@ use tower_http::cors::{Any, CorsLayer};
 
 pub struct Server {
     pub config: ServerConfig,
-    pub prover: Arc<AsyncShared<Prover>>,
+    pub prover: Arc<ProveSpellTxImpl>,
 }
 
 // Types
@@ -46,7 +45,7 @@ fn cors_layer() -> CorsLayer {
 }
 
 impl Server {
-    pub fn new(config: ServerConfig, prover: AsyncShared<Prover>) -> Self {
+    pub fn new(config: ServerConfig, prover: ProveSpellTxImpl) -> Self {
         let prover = Arc::new(prover);
         Self { config, prover }
     }
@@ -86,12 +85,10 @@ async fn show_spell_for_tx_hex(
 // #[axum_macros::debug_handler]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn prove_spell(
-    State(prover): State<Arc<AsyncShared<Prover>>>,
+    State(prover): State<Arc<ProveSpellTxImpl>>,
     Json(payload): Json<ProveRequest>,
 ) -> Result<Json<Vec<String>>, StatusCode> {
     let result = prover
-        .get()
-        .await
         .prove_spell_tx(payload)
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
@@ -118,7 +115,7 @@ fn show_spell(txid: &str, request: &ShowSpellRequest) -> Result<Spell, StatusCod
 }
 
 fn extract_spell(tx: &Tx) -> Result<Spell, StatusCode> {
-    match norm_spell(tx) {
+    match norm_spell(tx, false) {
         None => Err(StatusCode::NO_CONTENT),
         Some(spell) => Ok(Spell::denormalized(&spell)),
     }
