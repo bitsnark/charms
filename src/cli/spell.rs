@@ -1,7 +1,7 @@
 use crate::{
     SPELL_VK, cli,
-    cli::{BITCOIN, CARDANO, SpellCheckParams, SpellProveParams, spell_prover},
-    spell::{ProveRequest, ProveSpellTx, Spell},
+    cli::{BITCOIN, CARDANO, SpellCheckParams, SpellProveParams},
+    spell::{ProveRequest, ProveSpellTx, ProveSpellTxImpl, Spell},
 };
 use anyhow::{Result, ensure};
 use charms_app_runner::AppRunner;
@@ -55,7 +55,7 @@ impl Prove for SpellCli {
             mock,
         } = params;
 
-        let spell_prover = spell_prover(mock);
+        let spell_prover = ProveSpellTxImpl::new(mock);
 
         // Parse funding UTXO early: to fail fast
         let funding_utxo = UtxoId::from_str(&funding_utxo)?;

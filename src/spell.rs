@@ -1,13 +1,9 @@
 use crate::{
     SPELL_CHECKER_BINARY, SPELL_VK, app,
-    tx::{bitcoin_tx, txs_by_txid},
+    cli::{BITCOIN, CARDANO, charms_fee_settings, prove_impl},
+    tx::{bitcoin_tx, cardano_tx, txs_by_txid},
     utils,
     utils::{BoxedSP1Prover, Shared},
-};
-#[cfg(feature = "prover")]
-use crate::{
-    cli::{BITCOIN, CARDANO},
-    tx::cardano_tx,
 };
 use anyhow::{Error, anyhow, ensure};
 use ark_bls12_381::Bls12_381;
@@ -593,6 +589,8 @@ $TOAD: 9
 }
 
 pub trait ProveSpellTx: Send + Sync {
+    fn new(mock: bool) -> Self;
+
     fn prove_spell_tx(
         &self,
         prove_request: ProveRequest,
@@ -600,10 +598,11 @@ pub trait ProveSpellTx: Send + Sync {
 }
 
 pub struct ProveSpellTxImpl {
+    pub mock: bool,
+
     pub charms_fee_settings: Option<CharmsFee>,
     pub charms_prove_api_url: String,
 
-    #[cfg(feature = "prover")]
     pub prover: Box<dyn Prove>,
     #[cfg(not(feature = "prover"))]
     pub client: Client,
@@ -640,9 +639,8 @@ pub struct MockProver {
     pub app_runner: Arc<AppRunner>,
 }
 
-impl ProveSpellTx for ProveSpellTxImpl {
-    #[cfg(feature = "prover")]
-    async fn prove_spell_tx(
+impl ProveSpellTxImpl {
+    async fn do_prove_spell_tx(
         &self,
         ProveRequest {
             spell,
@@ -712,10 +710,50 @@ impl ProveSpellTx for ProveSpellTxImpl {
             _ => unreachable!(),
         }
     }
+}
+
+impl ProveSpellTx for ProveSpellTxImpl {
+    #[tracing::instrument(level = "debug")]
+    fn new(mock: bool) -> Self {
+        let charms_fee_settings = charms_fee_settings();
+
+        let charms_prove_api_url = std::env::var("CHARMS_PROVE_API_URL")
+            .ok()
+            .unwrap_or("https://prove.charms.dev/spells/prove".to_string());
+
+        let prover = prove_impl(mock);
+
+        #[cfg(not(feature = "prover"))]
+        let client = Client::builder()
+            .use_rustls_tls() // avoids system OpenSSL issues
+            .http2_prior_knowledge()
+            .http2_adaptive_window(true)
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .build()
+            .expect("HTTP client should be created successfully");
+
+        Self {
+            mock,
+            charms_fee_settings,
+            charms_prove_api_url,
+            prover,
+            #[cfg(not(feature = "prover"))]
+            client,
+        }
+    }
+
+    #[cfg(feature = "prover")]
+    async fn prove_spell_tx(&self, prove_request: ProveRequest) -> anyhow::Result<Vec<String>> {
+        Self::do_prove_spell_tx(self, prove_request).await
+    }
 
     #[cfg(not(feature = "prover"))]
     #[tracing::instrument(level = "info", skip_all)]
     async fn prove_spell_tx(&self, prove_request: ProveRequest) -> anyhow::Result<Vec<String>> {
+        if self.mock {
+            return Self::do_prove_spell_tx(self, prove_request).await;
+        }
+
         let prove_request = self.add_fee(prove_request);
         self.validate_prove_request(&prove_request)?;
 

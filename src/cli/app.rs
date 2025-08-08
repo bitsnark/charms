@@ -1,4 +1,4 @@
-pub(crate) use crate::{app::Prover, spell::Spell};
+use crate::spell::Spell;
 use anyhow::{Result, anyhow, ensure};
 use charms_app_runner::AppRunner;
 use charms_data::{B32, Data};

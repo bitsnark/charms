@@ -4,24 +4,25 @@ pub mod spell;
 pub mod tx;
 pub mod wallet;
 
-#[cfg(feature = "prover")]
-use crate::utils::sp1::cuda::SP1CudaProver;
 use crate::{
     cli::{
         server::Server,
         spell::{Check, Prove, SpellCli},
         wallet::{List, WalletCli},
     },
-    spell::{CharmsFee, MockProver, ProveSpellTxImpl, Prover},
+    spell::{CharmsFee, MockProver, ProveSpellTx, ProveSpellTxImpl},
     utils,
-    utils::{BoxedSP1Prover, Shared},
+    utils::BoxedSP1Prover,
+};
+#[cfg(feature = "prover")]
+use crate::{
+    spell::Prover,
+    utils::{Shared, sp1::cuda::SP1CudaProver},
 };
 use bitcoin::{Address, address::NetworkUnchecked};
 use charms_app_runner::AppRunner;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
-#[cfg(not(feature = "prover"))]
-use reqwest::Client;
 use serde::Serialize;
 use sp1_sdk::{CpuProver, NetworkProver, ProverClient, install::try_install_circuit_artifacts};
 use std::{io, net::IpAddr, path::PathBuf, str::FromStr, sync::Arc};
@@ -292,60 +293,36 @@ pub async fn run() -> anyhow::Result<()> {
 }
 
 fn server(server_config: ServerConfig) -> Server {
-    let prover = spell_prover(false);
+    let prover = ProveSpellTxImpl::new(false);
     Server::new(server_config, prover)
 }
 
-#[tracing::instrument(level = "debug")]
-fn spell_prover(mock: bool) -> ProveSpellTxImpl {
-    let charms_fee_settings = charms_fee_settings();
-
-    let charms_prove_api_url = std::env::var("CHARMS_PROVE_API_URL")
-        .ok()
-        .unwrap_or("https://prove.charms.dev/spells/prove".to_string());
-
-    #[cfg(feature = "prover")]
-    let prover = prove_impl(mock);
-
-    #[cfg(not(feature = "prover"))]
-    let client = Client::builder()
-        .use_rustls_tls() // avoids system OpenSSL issues
-        .http2_prior_knowledge()
-        .http2_adaptive_window(true)
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .build()
-        .expect("HTTP client should be created successfully");
-
-    let spell_prover = ProveSpellTxImpl {
-        charms_fee_settings,
-        charms_prove_api_url,
-        #[cfg(feature = "prover")]
-        prover,
-        #[cfg(not(feature = "prover"))]
-        client,
-    };
-    spell_prover
-}
-
 pub fn prove_impl(mock: bool) -> Box<dyn crate::spell::Prove> {
-    let app_prover = Arc::new(app::Prover {
-        sp1_client: Arc::new(Shared::new(app_sp1_client)),
-        runner: AppRunner::new(),
-    });
-    let spell_sp1_client = crate::cli::spell_sp1_client(&app_prover.sp1_client);
-
+    tracing::debug!(mock);
+    #[cfg(feature = "prover")]
     match mock {
-        false => Box::new(Prover {
-            app_prover: app_prover.clone(),
-            prover_client: spell_sp1_client.clone(),
-        }),
+        false => {
+            let app_prover = Arc::new(crate::app::Prover {
+                sp1_client: Arc::new(Shared::new(crate::cli::app_sp1_client)),
+                runner: AppRunner::new(),
+            });
+            let spell_sp1_client = crate::cli::spell_sp1_client(&app_prover.sp1_client);
+            Box::new(Prover {
+                app_prover: app_prover.clone(),
+                prover_client: spell_sp1_client.clone(),
+            })
+        }
         true => Box::new(MockProver {
-            app_runner: Arc::new(app_prover.runner.clone()),
+            app_runner: Arc::new(AppRunner::new()),
         }),
     }
+    #[cfg(not(feature = "prover"))]
+    Box::new(MockProver {
+        app_runner: Arc::new(AppRunner::new()),
+    })
 }
 
-fn charms_fee_settings() -> Option<CharmsFee> {
+pub(crate) fn charms_fee_settings() -> Option<CharmsFee> {
     charms_fee_address().map(|fee_address| {
         let charms_fee_rate = charms_fee_rate();
         let charms_fee_base = charms_fee_base();
@@ -390,11 +367,13 @@ fn spell_cli() -> SpellCli {
     spell_cli
 }
 
+#[cfg(feature = "prover")]
 fn app_sp1_client() -> BoxedSP1Prover {
     let name = std::env::var("APP_SP1_PROVER").unwrap_or_default();
     sp1_named_env_client(name.as_str())
 }
 
+#[cfg(feature = "prover")]
 fn spell_sp1_client(app_sp1_client: &Arc<Shared<BoxedSP1Prover>>) -> Arc<Shared<BoxedSP1Prover>> {
     let name = std::env::var("SPELL_SP1_PROVER").unwrap_or_default();
     match name.as_str() {
