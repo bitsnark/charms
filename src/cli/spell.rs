@@ -1,5 +1,5 @@
 use crate::{
-    SPELL_VK, cli,
+    cli,
     cli::{BITCOIN, CARDANO, SpellCheckParams, SpellProveParams},
     spell::{ProveRequest, ProveSpellTx, ProveSpellTxImpl, Spell},
 };
@@ -7,6 +7,7 @@ use anyhow::{Result, ensure};
 use charms_app_runner::AppRunner;
 use charms_client::{CURRENT_VERSION, tx::Tx};
 use charms_data::UtxoId;
+use charms_lib::SPELL_VK;
 use serde_json::json;
 use std::future::Future;
 

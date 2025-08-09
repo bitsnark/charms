@@ -1,9 +1,10 @@
-use crate::{SPELL_VK, spell::Spell};
+use crate::spell::Spell;
 use charms_client::{
     NormalizedSpell,
     tx::{EnchantedTx, Tx},
 };
 use charms_data::TxId;
+use charms_lib::SPELL_VK;
 use std::collections::BTreeMap;
 
 pub mod bitcoin_tx;

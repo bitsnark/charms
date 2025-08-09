@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail};
 use charms_data::{TxId, util};
 use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
-use serde_with::{IfIsHumanReadable, serde_as};
+use serde_with::serde_as;
 use sp1_primitives::io::SP1PublicValues;
 use sp1_verifier::Groth16Verifier;
 
@@ -27,22 +27,22 @@ serde_with::serde_conv!(
     BitcoinTxHex,
     BitcoinTx,
     |tx: &BitcoinTx| tx.hex(),
-    |s: &str| BitcoinTx::from_hex(s)
+    |s: String| BitcoinTx::from_hex(&s)
 );
 
 serde_with::serde_conv!(
     CardanoTxHex,
     CardanoTx,
     |tx: &CardanoTx| tx.hex(),
-    |s: &str| CardanoTx::from_hex(s)
+    |s: String| CardanoTx::from_hex(&s)
 );
 
 #[serde_as]
 #[enum_dispatch(EnchantedTx)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Tx {
-    Bitcoin(#[serde_as(as = "IfIsHumanReadable<BitcoinTxHex>")] BitcoinTx),
-    Cardano(#[serde_as(as = "IfIsHumanReadable<CardanoTxHex>")] CardanoTx),
+    Bitcoin(#[serde_as(as = "BitcoinTxHex")] BitcoinTx),
+    Cardano(#[serde_as(as = "CardanoTxHex")] CardanoTx),
 }
 
 impl Tx {

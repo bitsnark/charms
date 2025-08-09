@@ -1,5 +1,5 @@
 use crate::{
-    SPELL_CHECKER_BINARY, SPELL_VK, app,
+    SPELL_CHECKER_BINARY, app,
     cli::{BITCOIN, CARDANO, charms_fee_settings, prove_impl},
     tx::{bitcoin_tx, cardano_tx, txs_by_txid},
     utils,
@@ -30,6 +30,7 @@ pub use charms_client::{
     SpellProverInput, to_tx,
 };
 use charms_data::{App, B32, Charms, Data, Transaction, TxId, UtxoId, util};
+use charms_lib::SPELL_VK;
 #[cfg(not(feature = "prover"))]
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
