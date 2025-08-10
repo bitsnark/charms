@@ -3,6 +3,8 @@
 ## Prerequisites
 
 ```sh
+brew install llvm
+export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli
 ```
