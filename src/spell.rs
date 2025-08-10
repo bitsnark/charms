@@ -747,7 +747,9 @@ impl ProveSpellTx for ProveSpellTxImpl {
 
     #[cfg(feature = "prover")]
     async fn prove_spell_tx(&self, prove_request: ProveRequest) -> anyhow::Result<Vec<String>> {
-        self.validate_prove_request(&prove_request)?;
+        if !self.mock {
+            self.validate_prove_request(&prove_request)?;
+        }
         self.do_prove_spell_tx(prove_request).await
     }
 
@@ -758,6 +760,7 @@ impl ProveSpellTx for ProveSpellTxImpl {
             return Self::do_prove_spell_tx(self, prove_request).await;
         }
 
+        self.validate_prove_request(&prove_request)?;
         let response = self
             .client
             .post(&self.charms_prove_api_url)
