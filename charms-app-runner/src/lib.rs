@@ -302,7 +302,7 @@ impl AppRunner {
 
         let module = Module::new(&self.engine, app_binary)?;
 
-        let instance = linker.instantiate(&mut store, &module)?.start(&mut store)?;
+        let instance = linker.instantiate_and_start(&mut store, &module)?;
 
         let Some(main_func) = instance.get_func(&store, "_start") else {
             unreachable!("we should have a main function")
