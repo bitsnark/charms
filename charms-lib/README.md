@@ -2,11 +2,18 @@
 
 ## Prerequisites
 
+Install LLVM, Rust Wasm target support and wasm-bindgen CLI:
+
 ```sh
 brew install llvm
-export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 rustup target add wasm32-unknown-unknown
 cargo install wasm-bindgen-cli
+```
+
+Make sure LLVM is in your path:
+
+```sh
+export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 ```
 
 ## Building
