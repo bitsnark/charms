@@ -1,5 +1,6 @@
 [package]
 name = "charms-lib"
+description = "Charms Wasm Library"
 
 version.workspace = true
 edition.workspace = true
