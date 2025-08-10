@@ -1,17 +1,14 @@
 use crate::{
     cli::ServerConfig,
-    spell::{ProveRequest, ProveSpellTx, ProveSpellTxImpl, Spell},
-    tx::norm_spell,
+    spell::{ProveRequest, ProveSpellTx, ProveSpellTxImpl},
 };
 use anyhow::Result;
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::State,
     http::StatusCode,
-    routing::{get, post, put},
+    routing::{get, post},
 };
-use charms_client::tx::{EnchantedTx, Tx};
-use charms_data::TxId;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 use tower_http::cors::{Any, CorsLayer};
@@ -55,7 +52,6 @@ impl Server {
 
         // Build router with CORS middleware
         let app = Router::new();
-        let app = app.route("/spells/{txid}", put(show_spell_for_tx_hex));
         let app = app
             .route("/spells/prove", post(prove_spell))
             .with_state(self.prover.clone())
@@ -72,16 +68,6 @@ impl Server {
     }
 }
 
-// Handlers
-
-#[tracing::instrument(level = "debug", skip_all)]
-async fn show_spell_for_tx_hex(
-    Path(txid): Path<String>,
-    Json(payload): Json<ShowSpellRequest>,
-) -> Result<Json<Spell>, StatusCode> {
-    show_spell(&txid, &payload).map(Json)
-}
-
 // #[axum_macros::debug_handler]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn prove_spell(
@@ -93,30 +79,4 @@ async fn prove_spell(
         .await
         .map_err(|_| StatusCode::BAD_REQUEST)?;
     Ok(Json(result))
-}
-
-fn show_spell(txid: &str, request: &ShowSpellRequest) -> Result<Spell, StatusCode> {
-    let txid = TxId::from_str(txid).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let tx = Tx::from_hex(&request.tx_hex).map_err(|_| StatusCode::BAD_REQUEST)?;
-    match &tx {
-        Tx::Bitcoin(bitcoin_tx) => {
-            if bitcoin_tx.tx_id() != txid {
-                return Err(StatusCode::BAD_REQUEST);
-            }
-        }
-        Tx::Cardano(cardano_tx) => {
-            if cardano_tx.tx_id() != txid {
-                return Err(StatusCode::BAD_REQUEST);
-            }
-        }
-    }
-
-    extract_spell(&tx)
-}
-
-fn extract_spell(tx: &Tx) -> Result<Spell, StatusCode> {
-    match norm_spell(tx, false) {
-        None => Err(StatusCode::NO_CONTENT),
-        Some(spell) => Ok(Spell::denormalized(&spell)),
-    }
 }
