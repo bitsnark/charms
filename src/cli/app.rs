@@ -88,7 +88,7 @@ pub fn run(spell: PathBuf, path: Option<PathBuf>) -> Result<()> {
             fs::read(bin_path)?
         }
     };
-    let app_runner = AppRunner::new();
+    let app_runner = AppRunner::new(true);
     let vk = app_runner.vk(&binary);
 
     let spell: Spell = serde_yaml::from_slice(

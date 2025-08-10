@@ -313,7 +313,7 @@ pub fn make_transactions(
     prev_txs_by_id: &BTreeMap<TxId, Tx>,
     spell_data: &[u8],
     fee_rate: f64,
-    charms_fee: Option<CharmsFee>,
+    charms_fee: CharmsFee,
     total_cycles: u64,
 ) -> Result<Vec<Tx>, Error> {
     let change_address = bitcoin::Address::from_str(&change_address)?;
@@ -323,8 +323,8 @@ pub fn make_transactions(
     // Parse change address into ScriptPubkey
     let change_pubkey = change_address.assume_checked().script_pubkey();
 
-    let charms_fee_pubkey = charms_fee.clone().map(|fee| {
-        Address::from_str(&fee.fee_address)
+    let charms_fee_pubkey = charms_fee.fee_address.as_ref().map(|fee_address| {
+        Address::from_str(fee_address)
             .unwrap()
             .assume_checked()
             .script_pubkey()

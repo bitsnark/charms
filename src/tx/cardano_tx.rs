@@ -1,4 +1,7 @@
-use crate::{spell, spell::Spell};
+use crate::{
+    spell,
+    spell::{CharmsFee, Spell},
+};
 use anyhow::{Error, anyhow, bail};
 use charms_client::{
     cardano_tx::{CardanoTx, tx_hash, tx_id},
@@ -154,6 +157,8 @@ pub fn make_transactions(
     change_address: &String,
     spell_data: &[u8],
     prev_txs_by_id: &BTreeMap<TxId, Tx>,
+    _charms_fee: CharmsFee,
+    _total_cycles: u64,
 ) -> Result<Vec<Tx>, Error> {
     let change_address =
         Address::from_bech32(change_address).map_err(|e| anyhow::anyhow!("{}", e))?;

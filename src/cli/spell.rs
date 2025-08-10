@@ -81,7 +81,6 @@ impl Prove for SpellCli {
             funding_utxo_value,
             change_address,
             fee_rate,
-            charms_fee: None,
             chain: chain.clone(),
         };
         let transactions = spell_prover.prove_spell_tx(prove_request).await?;

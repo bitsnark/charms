@@ -26,6 +26,7 @@ pub struct AppProverOutput {
 
 #[derive(Clone)]
 pub struct AppRunner {
+    pub count_cycles: bool,
     pub engine: Engine,
 }
 
@@ -245,10 +246,13 @@ fn environ_get(caller: Caller<'_, HostState>, environ_ptr: i32, environ_buf_ptr:
 const MAX_FUEL_PER_RUN: u64 = 1000000000;
 
 impl AppRunner {
-    pub fn new() -> Self {
+    pub fn new(count_cycles: bool) -> Self {
         let mut config = Config::default();
-        config.consume_fuel(true);
+        if count_cycles {
+            config.consume_fuel(true);
+        }
         Self {
+            count_cycles,
             engine: Engine::new(&config),
         }
     }
@@ -277,7 +281,9 @@ impl AppRunner {
         };
 
         let mut store = Store::new(&self.engine, state.clone());
-        store.set_fuel(MAX_FUEL_PER_RUN)?;
+        if self.count_cycles {
+            store.set_fuel(MAX_FUEL_PER_RUN)?;
+        }
         let mut linker = Linker::new(&self.engine);
 
         linker.func_wrap("wasi_snapshot_preview1", "fd_write", fd_write)?;
@@ -307,8 +313,11 @@ impl AppRunner {
 
         result.map_err(|e| anyhow::anyhow!("error running wasm: {:?}", e))?;
 
-        let fuel_spent = MAX_FUEL_PER_RUN - store.get_fuel()?;
-        Ok(fuel_spent)
+        let cycles = match self.count_cycles {
+            true => MAX_FUEL_PER_RUN - store.get_fuel()?,
+            false => 0,
+        };
+        Ok(cycles)
     }
 
     pub fn run_all(
@@ -325,9 +334,9 @@ impl AppRunner {
                 let w = app_private_inputs.get(app).unwrap_or(&empty);
                 match app_binaries.get(&app.vk) {
                     Some(app_binary) => {
-                        let fuel_spent = self.run(app_binary, app, tx, x, w)?;
+                        let cycles = self.run(app_binary, app, tx, x, w)?;
                         eprintln!("✅  app contract satisfied: {}", app);
-                        Ok(fuel_spent)
+                        Ok(cycles)
                     }
                     None => {
                         ensure!(is_simple_transfer(app, tx));
@@ -336,7 +345,7 @@ impl AppRunner {
                     }
                 }
             })
-            .collect::<anyhow::Result<_>>()?;
+            .collect::<Result<_>>()?;
 
         Ok(app_cycles)
     }

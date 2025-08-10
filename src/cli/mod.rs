@@ -304,7 +304,7 @@ pub fn prove_impl(mock: bool) -> Box<dyn crate::spell::Prove> {
         false => {
             let app_prover = Arc::new(crate::app::Prover {
                 sp1_client: Arc::new(Shared::new(crate::cli::app_sp1_client)),
-                runner: AppRunner::new(),
+                runner: AppRunner::new(false),
             });
             let spell_sp1_client = crate::cli::spell_sp1_client(&app_prover.sp1_client);
             Box::new(Prover {
@@ -313,25 +313,24 @@ pub fn prove_impl(mock: bool) -> Box<dyn crate::spell::Prove> {
             })
         }
         true => Box::new(MockProver {
-            app_runner: Arc::new(AppRunner::new()),
+            app_runner: Arc::new(AppRunner::new(true)),
         }),
     }
     #[cfg(not(feature = "prover"))]
     Box::new(MockProver {
-        app_runner: Arc::new(AppRunner::new()),
+        app_runner: Arc::new(AppRunner::new(true)),
     })
 }
 
-pub(crate) fn charms_fee_settings() -> Option<CharmsFee> {
-    charms_fee_address().map(|fee_address| {
-        let charms_fee_rate = charms_fee_rate();
-        let charms_fee_base = charms_fee_base();
-        CharmsFee {
-            fee_address: fee_address.assume_checked().to_string(),
-            fee_rate: charms_fee_rate,
-            fee_base: charms_fee_base,
-        }
-    })
+pub(crate) fn charms_fee_settings() -> CharmsFee {
+    let charms_fee_rate = charms_fee_rate();
+    let charms_fee_base = charms_fee_base();
+    CharmsFee {
+        fee_address: charms_fee_address()
+            .map(|fee_address| fee_address.assume_checked().to_string()),
+        fee_rate: charms_fee_rate,
+        fee_base: charms_fee_base,
+    }
 }
 
 fn charms_fee_address() -> Option<Address<NetworkUnchecked>> {
@@ -340,6 +339,9 @@ fn charms_fee_address() -> Option<Address<NetworkUnchecked>> {
         .map(|s| Address::from_str(&s).expect("CHARMS_FEE_ADDRESS must be a valid Bitcoin address"))
 }
 
+const DEFAULT_CHARMS_FEE_RATE: u64 = 250; // per million Wasm instructions in apps
+const DEFAULT_CHARMS_FEE_BASE: u64 = 1000;
+
 fn charms_fee_rate() -> u64 {
     std::env::var("CHARMS_FEE_RATE")
         .ok()
@@ -347,7 +349,7 @@ fn charms_fee_rate() -> u64 {
             s.parse::<u64>()
                 .expect("CHARMS_FEE_RATE must be an unsigned integer")
         })
-        .unwrap_or(500)
+        .unwrap_or(DEFAULT_CHARMS_FEE_RATE)
 }
 
 fn charms_fee_base() -> u64 {
@@ -357,12 +359,12 @@ fn charms_fee_base() -> u64 {
             s.parse::<u64>()
                 .expect("CHARMS_FEE_BASE must be an unsigned integer")
         })
-        .unwrap_or(1000)
+        .unwrap_or(DEFAULT_CHARMS_FEE_BASE)
 }
 
 fn spell_cli() -> SpellCli {
     let spell_cli = SpellCli {
-        app_runner: AppRunner::new(),
+        app_runner: AppRunner::new(true),
     };
     spell_cli
 }
