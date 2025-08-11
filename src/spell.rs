@@ -640,9 +640,13 @@ pub struct MockProver {
 }
 
 impl ProveSpellTxImpl {
-    async fn do_prove_spell_tx(
-        &self,
-        ProveRequest {
+    async fn do_prove_spell_tx(&self, prove_request: ProveRequest) -> anyhow::Result<Vec<String>> {
+        let total_app_cycles = if !self.mock {
+            self.validate_prove_request(&prove_request)?
+        } else {
+            0
+        };
+        let ProveRequest {
             spell,
             binaries,
             prev_txs,
@@ -651,8 +655,8 @@ impl ProveSpellTxImpl {
             change_address,
             fee_rate,
             chain,
-        }: ProveRequest,
-    ) -> anyhow::Result<Vec<String>> {
+        } = prove_request;
+
         let prev_txs = from_hex_txs(&prev_txs)?;
         let prev_txs_by_id = txs_by_txid(&prev_txs);
 
@@ -667,7 +671,7 @@ impl ProveSpellTxImpl {
 
         let (norm_spell, app_private_inputs, tx_ins_beamed_source_utxos) = spell.normalized()?;
 
-        let (norm_spell, proof, total_cycles) = self.prover.prove(
+        let (norm_spell, proof, proof_app_cycles) = self.prover.prove(
             norm_spell,
             binaries,
             app_private_inputs,
@@ -675,7 +679,13 @@ impl ProveSpellTxImpl {
             tx_ins_beamed_source_utxos,
         )?;
 
-        tracing::info!("proof generated. total cycles: {}", total_cycles,);
+        let total_cycles = if !self.mock {
+            total_app_cycles
+        } else {
+            proof_app_cycles // mock prover computes app run cycles
+        };
+
+        tracing::info!("proof generated. total app cycles: {}", total_cycles);
 
         // Serialize spell into CBOR
         let spell_data = util::write(&(&norm_spell, &proof))?;
@@ -747,9 +757,6 @@ impl ProveSpellTx for ProveSpellTxImpl {
 
     #[cfg(feature = "prover")]
     async fn prove_spell_tx(&self, prove_request: ProveRequest) -> anyhow::Result<Vec<String>> {
-        if !self.mock {
-            self.validate_prove_request(&prove_request)?;
-        }
         self.do_prove_spell_tx(prove_request).await
     }
 
@@ -795,7 +802,7 @@ fn ensure_all_prev_txs_are_present(
 }
 
 impl ProveSpellTxImpl {
-    pub fn validate_prove_request(&self, prove_request: &ProveRequest) -> anyhow::Result<()> {
+    pub fn validate_prove_request(&self, prove_request: &ProveRequest) -> anyhow::Result<u64> {
         let prev_txs = &prove_request.prev_txs;
         let prev_txs = from_hex_txs(&prev_txs)?;
         let prev_txs_by_id = txs_by_txid(&prev_txs);
@@ -810,7 +817,6 @@ impl ProveSpellTxImpl {
 
         let prev_spells = charms_client::prev_spells(&prev_txs, SPELL_VK, self.mock);
 
-        // let total_cycles = self.prover.app_runner().run_all()?;
         let tx = to_tx(&norm_spell, &prev_spells, &tx_ins_beamed_source_utxos);
         // prove charms-app-checker run
         let cycles = AppRunner::new(true).run_all(
@@ -861,13 +867,13 @@ impl ProveSpellTxImpl {
                 );
 
                 tracing::info!(total_sats_in, funding_utxo_sats, total_sats_out, charms_fee);
-                Ok(())
             }
             CARDANO => {
                 todo!()
             }
             _ => unreachable!(),
         }
+        Ok(total_cycles)
     }
 }
 
