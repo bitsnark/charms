@@ -1,8 +1,8 @@
 use crate::{
     app,
+    cli::spell,
     tx::{bitcoin_tx, txs_by_txid},
-    utils,
-    utils::{BoxedSP1Prover, Shared},
+    utils::{self, BoxedSP1Prover, Shared},
     SPELL_CHECKER_BINARY, SPELL_VK,
 };
 #[cfg(feature = "prover")]
@@ -24,7 +24,7 @@ use charms_data::{util, App, Charms, Data, Transaction, TxId, UtxoId, B32};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_with::{base64::Base64, serde_as, IfIsHumanReadable};
-use sp1_sdk::{SP1ProofMode, SP1Stdin};
+use sp1_sdk::{SP1ProofMode, SP1ProofWithPublicValues, SP1Stdin};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -430,20 +430,61 @@ impl Prove for Prover {
 
         let app_public_inputs = &norm_spell.app_public_inputs;
 
-        let app_cycles = self.app_prover.prove(
-            app_binaries,
-            tx,
-            app_public_inputs,
-            app_private_inputs,
-            &mut stdin,
-        )?;
+        // Print a timestamp
+        println!(
+            "{} Proving spell",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
+
+        let app_cycles;
+        if std::env::var("USE_MOCK_PROOF").ok() == Some("true".to_string()) {
+            println!("Using mock proof! - avoid proving");
+            app_cycles = 0;
+        } else {
+            app_cycles = self.app_prover.prove(
+                app_binaries,
+                tx,
+                app_public_inputs,
+                app_private_inputs,
+                &mut stdin,
+            )?;
+        }
+
+        println!(
+            "{} Proof obtained 1",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
 
         let (pk, _) = self.sp1_client.get().setup(SPELL_CHECKER_BINARY);
-        let (proof, spell_cycles) =
-            self.sp1_client
-                .get()
-                .prove(&pk, &stdin, SP1ProofMode::Groth16)?;
-        let proof = proof.bytes().into_boxed_slice();
+
+        let (proof, spell_cycles): (Box<[u8]>, u64);
+
+        if std::env::var("USE_MOCK_PROOF").ok() == Some("true".to_string()) {
+            println!("Using mock proof!");
+            proof = Vec::new().into_boxed_slice();
+            spell_cycles = 0;
+        } else {
+            let (real_proof, real_spell_cycles) =
+                self.sp1_client
+                    .get()
+                    .prove(&pk, &stdin, SP1ProofMode::Groth16)?;
+            proof = real_proof.bytes().into_boxed_slice();
+            spell_cycles = real_spell_cycles;
+        }
+
+        println!(
+            "{} Proof obtained 2",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        );
 
         let mut norm_spell2 = norm_spell;
         norm_spell2.tx.ins = None;
@@ -505,6 +546,7 @@ pub struct ProveRequest {
     pub fee_rate: f64,
     pub charms_fee: Option<CharmsFee>,
     pub chain: String,
+    pub temporary_secret_str: Option<String>,
 }
 
 pub struct Prover {
@@ -530,6 +572,7 @@ impl ProveSpellTx for Prover {
             fee_rate,
             charms_fee,
             chain,
+            temporary_secret_str,
         }: ProveRequest,
     ) -> anyhow::Result<Vec<String>> {
         let prev_txs = from_hex_txs(&prev_txs)?;
@@ -571,6 +614,7 @@ impl ProveSpellTx for Prover {
                     fee_rate,
                     charms_fee,
                     total_cycles,
+                    temporary_secret_str.as_deref(),
                 )?;
                 Ok(to_hex_txs(&txs))
             }

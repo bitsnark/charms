@@ -9,7 +9,7 @@ use bitcoin::{
     absolute::LockTime,
     hashes::Hash,
     key::Secp256k1,
-    secp256k1::{rand::thread_rng, schnorr, Keypair, Message},
+    secp256k1::{rand::thread_rng, schnorr, Keypair, Message, SecretKey},
     sighash::{Prevouts, SighashCache},
     taproot,
     taproot::LeafVersion,
@@ -51,9 +51,25 @@ pub fn add_spell(
     prev_txs: &BTreeMap<TxId, Tx>,
     charms_fee_pubkey: Option<ScriptBuf>,
     charms_fee: Amount,
+    temporary_secret_str: Option<&str>,
 ) -> Vec<Transaction> {
     let secp256k1 = Secp256k1::new();
-    let keypair = Keypair::new(&secp256k1, &mut thread_rng());
+
+    // Build the KeyPair either deterministically or randomly
+    let keypair = match temporary_secret_str {
+        Some(secret_str) => {
+            // Decode hex into bytes
+            let bytes = hex::decode(secret_str).expect("Invalid hex string for secret key");
+            // Construct SecretKey (will Err if out of range)
+            let sk = SecretKey::from_slice(&bytes).expect("Invalid secret");
+            Keypair::from_secret_key(&secp256k1, &sk)
+        }
+        None => {
+            // Use the OS RNG for randomness
+            Keypair::new(&secp256k1, &mut thread_rng())
+        }
+    };
+
     let (public_key, _) = XOnlyPublicKey::from_keypair(&keypair);
 
     let script = data_script(public_key, &spell_data);
@@ -316,6 +332,7 @@ pub fn make_transactions(
     fee_rate: f64,
     charms_fee: Option<CharmsFee>,
     total_cycles: u64,
+    temporary_secret_str: Option<&str>,
 ) -> Result<Vec<Tx>, Error> {
     let change_address = bitcoin::Address::from_str(&change_address)?;
 
@@ -350,6 +367,7 @@ pub fn make_transactions(
         &prev_txs_by_id,
         charms_fee_pubkey,
         charms_fee,
+        temporary_secret_str.as_deref(),
     );
     Ok(transactions
         .into_iter()
