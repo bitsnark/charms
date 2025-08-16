@@ -157,7 +157,7 @@ pub fn make_transactions(
     change_address: &String,
     spell_data: &[u8],
     prev_txs_by_id: &BTreeMap<TxId, Tx>,
-    _charms_fee: CharmsFee,
+    _charms_fee: Option<CharmsFee>,
     _total_cycles: u64,
 ) -> Result<Vec<Tx>, Error> {
     let change_address =

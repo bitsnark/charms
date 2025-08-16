@@ -5,7 +5,7 @@ use crate::{
     utils,
     utils::{BoxedSP1Prover, Shared},
 };
-use anyhow::{anyhow, ensure};
+use anyhow::{anyhow, bail, ensure};
 use ark_bls12_381::Bls12_381;
 use ark_ec::pairing::Pairing;
 use ark_ff::{Field, ToConstraintField};
@@ -20,7 +20,7 @@ use ark_std::{
     rand::{RngCore, SeedableRng},
     test_rng,
 };
-use bitcoin::{Amount, hashes::Hash};
+use bitcoin::{Amount, Network, hashes::Hash};
 use charms_app_runner::AppRunner;
 use charms_client::{AppProverOutput, MOCK_SPELL_VK, bitcoin_tx::BitcoinTx, tx::Tx, well_formed};
 pub use charms_client::{
@@ -37,6 +37,7 @@ use sha2::{Digest, Sha256};
 use sp1_sdk::{SP1ProofMode, SP1Stdin};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    str::FromStr,
     sync::Arc,
 };
 
@@ -601,7 +602,7 @@ pub trait ProveSpellTx: Send + Sync {
 pub struct ProveSpellTxImpl {
     pub mock: bool,
 
-    pub charms_fee_settings: CharmsFee,
+    pub charms_fee_settings: Option<CharmsFee>,
     pub charms_prove_api_url: String,
 
     pub prover: Box<dyn Prove>,
@@ -609,11 +610,27 @@ pub struct ProveSpellTxImpl {
     pub client: Client,
 }
 
+pub type FeeAddressForNetwork = BTreeMap<String, String>;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CharmsFee {
-    pub fee_address: Option<String>,
+    /// Fee addresses for each chain (bitcoin, cardano, etc.) further broken down by network
+    /// (mainnet, testnet, etc.).
+    pub fee_addresses: BTreeMap<String, FeeAddressForNetwork>,
+    /// Fee rate in sats per mega cycle.
     pub fee_rate: u64,
+    /// Base fee in sats.
     pub fee_base: u64,
+}
+
+impl CharmsFee {
+    pub fn fee_address(&self, chain: &str, network: &str) -> Option<&str> {
+        self.fee_addresses.get(chain).and_then(|fee_addresses| {
+            fee_addresses
+                .get(network)
+                .map(|fee_address| fee_address.as_str())
+        })
+    }
 }
 
 #[serde_as]
@@ -834,8 +851,20 @@ impl ProveSpellTxImpl {
 
         match prove_request.chain.as_str() {
             BITCOIN => {
-                let charms_fee =
-                    get_charms_fee(self.charms_fee_settings.clone(), total_cycles).to_sat();
+                let change_address = bitcoin::Address::from_str(&prove_request.change_address)?;
+
+                let network = match &change_address {
+                    a if a.is_valid_for_network(Network::Bitcoin) => Network::Bitcoin,
+                    a if a.is_valid_for_network(Network::Testnet4) => Network::Testnet4,
+                    _ => bail!("Invalid change address: {:?}", change_address),
+                };
+                ensure!(prove_request.spell.outs.iter().all(|o| {
+                    o.address.as_ref().is_some()
+                        && bitcoin::Address::from_str(o.address.as_ref().unwrap())
+                            .is_ok_and(|a| a.is_valid_for_network(network))
+                }));
+
+                let charms_fee = get_charms_fee(&self.charms_fee_settings, total_cycles).to_sat();
 
                 let total_sats_in: u64 = (&prove_request.spell.ins)
                     .iter()
@@ -885,10 +914,10 @@ pub fn to_hex_txs(txs: &[Tx]) -> Vec<String> {
     txs.iter().map(|tx| tx.hex()).collect()
 }
 
-pub fn get_charms_fee(charms_fee: CharmsFee, total_cycles: u64) -> Amount {
-    (charms_fee.fee_address)
+pub fn get_charms_fee(charms_fee: &Option<CharmsFee>, total_cycles: u64) -> Amount {
+    charms_fee
         .as_ref()
-        .map(|_| {
+        .map(|charms_fee| {
             Amount::from_sat(total_cycles * charms_fee.fee_rate / 1000000 + charms_fee.fee_base)
         })
         .unwrap_or_default()

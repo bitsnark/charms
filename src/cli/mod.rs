@@ -25,7 +25,7 @@ use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use serde::Serialize;
 use sp1_sdk::{CpuProver, NetworkProver, ProverClient, install::try_install_circuit_artifacts};
-use std::{io, net::IpAddr, path::PathBuf, str::FromStr, sync::Arc};
+use std::{collections::BTreeMap, io, net::IpAddr, path::PathBuf, str::FromStr, sync::Arc};
 
 pub const BITCOIN: &str = "bitcoin";
 pub const CARDANO: &str = "cardano";
@@ -322,44 +322,14 @@ pub fn prove_impl(mock: bool) -> Box<dyn crate::spell::Prove> {
     })
 }
 
-pub(crate) fn charms_fee_settings() -> CharmsFee {
-    let charms_fee_rate = charms_fee_rate();
-    let charms_fee_base = charms_fee_base();
-    CharmsFee {
-        fee_address: charms_fee_address()
-            .map(|fee_address| fee_address.assume_checked().to_string()),
-        fee_rate: charms_fee_rate,
-        fee_base: charms_fee_base,
-    }
-}
-
-fn charms_fee_address() -> Option<Address<NetworkUnchecked>> {
-    std::env::var("CHARMS_FEE_ADDRESS")
-        .ok()
-        .map(|s| Address::from_str(&s).expect("CHARMS_FEE_ADDRESS must be a valid Bitcoin address"))
-}
-
-const DEFAULT_CHARMS_FEE_RATE: u64 = 250; // per million Wasm instructions in apps
-const DEFAULT_CHARMS_FEE_BASE: u64 = 1000;
-
-fn charms_fee_rate() -> u64 {
-    std::env::var("CHARMS_FEE_RATE")
-        .ok()
-        .map(|s| {
-            s.parse::<u64>()
-                .expect("CHARMS_FEE_RATE must be an unsigned integer")
-        })
-        .unwrap_or(DEFAULT_CHARMS_FEE_RATE)
-}
-
-fn charms_fee_base() -> u64 {
-    std::env::var("CHARMS_FEE_BASE")
-        .ok()
-        .map(|s| {
-            s.parse::<u64>()
-                .expect("CHARMS_FEE_BASE must be an unsigned integer")
-        })
-        .unwrap_or(DEFAULT_CHARMS_FEE_BASE)
+pub(crate) fn charms_fee_settings() -> Option<CharmsFee> {
+    let fee_settings_file = std::env::var("CHARMS_FEE_SETTINGS").ok()?;
+    let fee_settings = serde_yaml::from_reader(
+        &std::fs::File::open(fee_settings_file)
+            .expect("should be able to open the fee settings file"),
+    )
+    .expect("should be able to parse the fee settings file");
+    Some(fee_settings)
 }
 
 fn spell_cli() -> SpellCli {
