@@ -4,7 +4,7 @@ use crate::{
     spell,
     spell::{CharmsFee, Input, Output, Spell},
 };
-use anyhow::{Error, bail};
+use anyhow::bail;
 use bitcoin::{
     self, Address, Amount, FeeRate, Network, OutPoint, ScriptBuf, TapLeafHash, TapSighashType,
     Transaction, TxIn, TxOut, Txid, Weight, Witness, XOnlyPublicKey,

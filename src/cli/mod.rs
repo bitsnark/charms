@@ -19,13 +19,14 @@ use crate::{
     spell::Prover,
     utils::{Shared, sp1::cuda::SP1CudaProver},
 };
-use bitcoin::{Address, address::NetworkUnchecked};
+use bitcoin::{Address, Network};
 use charms_app_runner::AppRunner;
+use charms_data::check;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use serde::Serialize;
 use sp1_sdk::{CpuProver, NetworkProver, ProverClient, install::try_install_circuit_artifacts};
-use std::{collections::BTreeMap, io, net::IpAddr, path::PathBuf, str::FromStr, sync::Arc};
+use std::{io, net::IpAddr, path::PathBuf, str::FromStr, sync::Arc};
 
 pub const BITCOIN: &str = "bitcoin";
 pub const CARDANO: &str = "cardano";
@@ -324,11 +325,27 @@ pub fn prove_impl(mock: bool) -> Box<dyn crate::spell::Prove> {
 
 pub(crate) fn charms_fee_settings() -> Option<CharmsFee> {
     let fee_settings_file = std::env::var("CHARMS_FEE_SETTINGS").ok()?;
-    let fee_settings = serde_yaml::from_reader(
+    let fee_settings: CharmsFee = serde_yaml::from_reader(
         &std::fs::File::open(fee_settings_file)
             .expect("should be able to open the fee settings file"),
     )
     .expect("should be able to parse the fee settings file");
+
+    assert!(
+        fee_settings.fee_addresses[BITCOIN]
+            .iter()
+            .all(|(network, address)| {
+                let network = Network::from_core_arg(network)
+                    .expect("network should be a valid `bitcoind -chain` argument");
+                check!(
+                    Address::from_str(address)
+                        .is_ok_and(|address| address.is_valid_for_network(network))
+                );
+                true
+            }),
+        "a fee address is not valid for the specified network"
+    );
+
     Some(fee_settings)
 }
 
