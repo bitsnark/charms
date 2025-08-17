@@ -658,11 +658,7 @@ pub struct MockProver {
 
 impl ProveSpellTxImpl {
     async fn do_prove_spell_tx(&self, prove_request: ProveRequest) -> anyhow::Result<Vec<String>> {
-        let total_app_cycles = if !self.mock {
-            self.validate_prove_request(&prove_request)?
-        } else {
-            0
-        };
+        let total_app_cycles = self.validate_prove_request(&prove_request)?;
         let ProveRequest {
             spell,
             binaries,
@@ -676,15 +672,6 @@ impl ProveSpellTxImpl {
 
         let prev_txs = from_hex_txs(&prev_txs)?;
         let prev_txs_by_id = txs_by_txid(&prev_txs);
-
-        let all_inputs_produced_by_prev_txs = spell
-            .ins
-            .iter()
-            .all(|input| prev_txs_by_id.contains_key(&input.utxo_id.as_ref().unwrap().0));
-        ensure!(
-            all_inputs_produced_by_prev_txs,
-            "prev_txs must include transactions for all inputs"
-        );
 
         let (norm_spell, app_private_inputs, tx_ins_beamed_source_utxos) = spell.normalized()?;
 
@@ -737,7 +724,7 @@ impl ProveSpellTxImpl {
                 )?;
                 Ok(to_hex_txs(&txs))
             }
-            _ => unreachable!(),
+            _ => bail!("unsupported chain: {}", chain),
         }
     }
 }
