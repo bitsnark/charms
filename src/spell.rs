@@ -158,6 +158,8 @@ impl Spell {
         BTreeMap<App, Data>,
         BTreeMap<UtxoId, UtxoId>,
     )> {
+        ensure!(self.version == CURRENT_VERSION);
+
         let empty_map = BTreeMap::new();
         let keyed_public_inputs = self.public_args.as_ref().unwrap_or(&empty_map);
 
