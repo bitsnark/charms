@@ -19,7 +19,7 @@ pub fn tx_show_spell(params: ShowSpellParams) -> Result<()> {
         _ => unimplemented!(),
     };
 
-    match tx::spell(&tx, mock) {
+    match tx::spell(&tx, mock)? {
         Some(spell) => cli::print_output(&spell, json)?,
         None => eprintln!("No spell found in the transaction"),
     }

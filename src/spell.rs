@@ -206,8 +206,8 @@ impl Spell {
                         let app = keyed_apps.get(k).ok_or(anyhow!("missing app key"))?;
                         let i = *app_to_index
                             .get(app)
-                            .expect("app should be in app_to_index");
-                        Ok((i, Data::from(v)))
+                            .ok_or(anyhow!("app is expected to be in app_to_index"))?;
+                        Ok((i, v.clone()))
                     })
                     .collect::<anyhow::Result<NormalizedCharms>>()?;
                 Ok(n_charms)
@@ -244,7 +244,7 @@ impl Spell {
                 let tx_in = input
                     .utxo_id
                     .as_ref()
-                    .expect("inputs should have utxo_id set")
+                    .expect("inputs are expected to have utxo_id set")
                     .clone();
                 input
                     .beamed_from
@@ -258,20 +258,19 @@ impl Spell {
 
     /// De-normalize a normalized spell.
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn denormalized(norm_spell: &NormalizedSpell) -> Self {
+    pub fn denormalized(norm_spell: &NormalizedSpell) -> anyhow::Result<Self> {
         let apps = (0..)
             .zip(norm_spell.app_public_inputs.keys())
             .map(|(i, app)| (utils::str_index(&i), app.clone()))
             .collect();
 
-        let public_inputs = match (0..)
-            .zip(norm_spell.app_public_inputs.values())
+        let public_inputs = match norm_spell
+            .app_public_inputs
+            .values()
+            .enumerate()
             .filter_map(|(i, data)| match data {
                 data if data.is_empty() => None,
-                data => Some((
-                    utils::str_index(&i),
-                    data.value().ok().expect("Data should be a Value"),
-                )),
+                data => Some((utils::str_index(&(i as u32)), data.clone())),
             })
             .collect::<BTreeMap<_, _>>()
         {
@@ -280,7 +279,7 @@ impl Spell {
         };
 
         let Some(norm_spell_ins) = &norm_spell.tx.ins else {
-            unreachable!("spell must have inputs");
+            bail!("spell must have inputs");
         };
         let ins = norm_spell_ins
             .iter()
@@ -311,12 +310,7 @@ impl Spell {
                 amount: None,
                 charms: match n_charms
                     .iter()
-                    .map(|(i, data)| {
-                        (
-                            utils::str_index(i),
-                            data.value().ok().expect("Data should be a Value"),
-                        )
-                    })
+                    .map(|(i, data)| (utils::str_index(i), data.clone()))
                     .collect::<KeyedCharms>()
                 {
                     charms if charms.is_empty() => None,
@@ -330,7 +324,7 @@ impl Spell {
             })
             .collect();
 
-        Self {
+        Ok(Self {
             version: norm_spell.version,
             apps,
             public_args: public_inputs,
@@ -338,7 +332,7 @@ impl Spell {
             ins,
             refs,
             outs,
-        }
+        })
     }
 }
 
@@ -416,7 +410,10 @@ impl Prove for Prover {
         prev_txs: Vec<Tx>,
         tx_ins_beamed_source_utxos: BTreeMap<UtxoId, UtxoId>,
     ) -> anyhow::Result<(NormalizedSpell, Proof, u64)> {
-        assert!(!norm_spell.mock, "mock norm_spell cannot be here");
+        ensure!(
+            !norm_spell.mock,
+            "trying to prove a mock spell with a real prover"
+        );
 
         let mut stdin = SP1Stdin::new();
 
@@ -523,7 +520,7 @@ impl Prove for MockProver {
 
         let field_elements = Sha256::digest(&committed_data)
             .to_field_elements()
-            .expect("non-empty vector");
+            .expect("non-empty vector is expected");
         let circuit = DummyCircuit {
             a: Some(field_elements[0]),
         };
@@ -786,15 +783,17 @@ impl ProveSpellTx for ProveSpellTxImpl {
 }
 
 fn ensure_all_prev_txs_are_present(
-    spell: &Spell,
+    spell: &NormalizedSpell,
     tx_ins_beamed_source_utxos: &BTreeMap<UtxoId, UtxoId>,
     prev_txs_by_id: &BTreeMap<TxId, Tx>,
 ) -> anyhow::Result<()> {
-    ensure!(spell.ins.iter().all(|input| {
-        input.utxo_id.is_some() && prev_txs_by_id.contains_key(&input.utxo_id.as_ref().unwrap().0)
+    ensure!(spell.tx.ins.as_ref().is_some_and(|ins| {
+        ins.iter()
+            .all(|utxo_id| prev_txs_by_id.contains_key(&utxo_id.0))
     }));
-    ensure!(spell.refs.iter().flatten().all(|input| {
-        input.utxo_id.is_some() && prev_txs_by_id.contains_key(&input.utxo_id.as_ref().unwrap().0)
+    ensure!(spell.tx.refs.as_ref().is_none_or(|ins| {
+        ins.iter()
+            .all(|utxo_id| prev_txs_by_id.contains_key(&utxo_id.0))
     }));
     ensure!(
         tx_ins_beamed_source_utxos
@@ -815,11 +814,7 @@ impl ProveSpellTxImpl {
 
         let (norm_spell, app_private_inputs, tx_ins_beamed_source_utxos) =
             prove_request.spell.normalized()?;
-        ensure_all_prev_txs_are_present(
-            &prove_request.spell,
-            &tx_ins_beamed_source_utxos,
-            &prev_txs_by_id,
-        )?;
+        ensure_all_prev_txs_are_present(&norm_spell, &tx_ins_beamed_source_utxos, &prev_txs_by_id)?;
 
         let prev_spells = charms_client::prev_spells(&prev_txs, SPELL_VK, self.mock);
 
@@ -851,9 +846,9 @@ impl ProveSpellTxImpl {
                     ),
                 };
                 ensure!(prove_request.spell.outs.iter().all(|o| {
-                    o.address.as_ref().is_some()
-                        && bitcoin::Address::from_str(o.address.as_ref().unwrap())
-                            .is_ok_and(|a| a.is_valid_for_network(network))
+                    o.address.as_ref().is_some_and(|a| {
+                        bitcoin::Address::from_str(a).is_ok_and(|a| a.is_valid_for_network(network))
+                    })
                 }));
 
                 let charms_fee = get_charms_fee(&self.charms_fee_settings, total_cycles).to_sat();
@@ -861,19 +856,23 @@ impl ProveSpellTxImpl {
                 let total_sats_in: u64 = (&prove_request.spell.ins)
                     .iter()
                     .map(|i| {
+                        let utxo_id = i.utxo_id.as_ref().expect("utxo_id is expected to be Some");
                         prev_txs_by_id
-                            .get(&i.utxo_id.as_ref().unwrap().0)
-                            .map(|prev_tx| {
+                            .get(&utxo_id.0)
+                            .and_then(|prev_tx| {
                                 if let Tx::Bitcoin(BitcoinTx(prev_tx)) = prev_tx {
-                                    prev_tx.output[i.utxo_id.as_ref().unwrap().1 as usize]
-                                        .value
-                                        .to_sat()
+                                    prev_tx
+                                        .output
+                                        .get(utxo_id.1 as usize)
+                                        .map(|o| o.value.to_sat())
                                 } else {
-                                    0
+                                    None
                                 }
                             })
-                            .unwrap_or_default()
+                            .ok_or(anyhow!("utxo not found in prev_txs: {}", utxo_id))
                     })
+                    .collect::<anyhow::Result<Vec<_>>>()?
+                    .iter()
                     .sum();
                 let total_sats_out: u64 = (&prove_request.spell.outs)
                     .iter()

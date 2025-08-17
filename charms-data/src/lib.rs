@@ -78,7 +78,7 @@ impl UtxoId {
     pub fn from_bytes(bytes: [u8; 36]) -> Self {
         let mut txid_bytes = [0u8; 32];
         txid_bytes.copy_from_slice(&bytes[..32]);
-        let index = u32::from_le_bytes(bytes[32..].try_into().unwrap());
+        let index = u32::from_le_bytes(bytes[32..].try_into().expect("exactly 4 bytes expected"));
         UtxoId(TxId(txid_bytes), index)
     }
 
@@ -321,7 +321,7 @@ impl TxId {
     pub fn from_str(s: &str) -> Result<Self> {
         ensure!(s.len() == 64, "expected 64 hex characters");
         let bytes = hex::decode(s).map_err(|e| anyhow!("invalid txid hex: {}", e))?;
-        let mut txid: [u8; 32] = bytes.try_into().unwrap();
+        let mut txid: [u8; 32] = bytes.try_into().expect("exactly 32 bytes expected");
         txid.reverse();
         Ok(TxId(txid))
     }
@@ -409,7 +409,7 @@ impl B32 {
     pub fn from_str(s: &str) -> Result<Self> {
         ensure!(s.len() == 64, "expected 64 hex characters");
         let bytes = hex::decode(s).map_err(|e| anyhow!("invalid hex: {}", e))?;
-        let hash: [u8; 32] = bytes.try_into().unwrap();
+        let hash: [u8; 32] = bytes.try_into().expect("exactly 32 bytes expected");
         Ok(B32(hash))
     }
 }
@@ -510,7 +510,7 @@ impl Ord for Data {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0
             .partial_cmp(&other.0)
-            .expect("Value comparison should have succeeded")
+            .expect("Value comparison should have succeeded") // PANIC: will panic if CBOR Value comparison returns None (NaN or incomparable). We expect this to never happen (famous last words).
     }
 }
 
@@ -535,7 +535,7 @@ impl Data {
 
     /// Serialize to bytes.
     pub fn bytes(&self) -> Vec<u8> {
-        util::write(&self).expect("serialization should have succeeded")
+        util::write(&self).expect("serialization is expected to succeed")
     }
 }
 
@@ -544,7 +544,7 @@ where
     T: Serialize,
 {
     fn from(value: &T) -> Self {
-        Self(Value::serialized(value).expect("casting to a CBOR Value should have succeeded"))
+        Self(Value::serialized(value).expect("casting to a CBOR Value is expected to succeed"))
     }
 }
 

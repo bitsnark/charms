@@ -21,10 +21,10 @@ pub fn norm_spell(tx: &Tx, mock: bool) -> Option<NormalizedSpell> {
 }
 
 #[tracing::instrument(level = "debug", skip_all)]
-pub fn spell(tx: &Tx, mock: bool) -> Option<Spell> {
+pub fn spell(tx: &Tx, mock: bool) -> anyhow::Result<Option<Spell>> {
     match norm_spell(tx, mock) {
-        Some(norm_spell) => Some(Spell::denormalized(&norm_spell)),
-        None => None,
+        Some(norm_spell) => Ok(Some(Spell::denormalized(&norm_spell)?)),
+        None => Ok(None),
     }
 }
 
