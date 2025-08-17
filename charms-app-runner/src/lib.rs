@@ -331,18 +331,18 @@ impl AppRunner {
         let app_cycles = app_public_inputs
             .iter()
             .map(|(app, x)| {
-                let w = app_private_inputs.get(app).unwrap_or(&empty);
+                if is_simple_transfer(app, tx) {
+                    eprintln!("➡️  simple transfer w.r.t. app: {}", app);
+                    return Ok(0);
+                }
                 match app_binaries.get(&app.vk) {
                     Some(app_binary) => {
+                        let w = app_private_inputs.get(app).unwrap_or(&empty);
                         let cycles = self.run(app_binary, app, tx, x, w)?;
                         eprintln!("✅  app contract satisfied: {}", app);
                         Ok(cycles)
                     }
-                    None => {
-                        ensure!(is_simple_transfer(app, tx));
-                        eprintln!("✅  simple transfer ok: {}", app);
-                        Ok(0)
-                    }
+                    None => bail!("app binary not found: {}", app),
                 }
             })
             .collect::<Result<_>>()?;
