@@ -73,10 +73,10 @@ impl Server {
 async fn prove_spell(
     State(prover): State<Arc<ProveSpellTxImpl>>,
     Json(payload): Json<ProveRequest>,
-) -> Result<Json<Vec<String>>, StatusCode> {
+) -> Result<Json<Vec<String>>, (StatusCode, Json<String>)> {
     let result = prover
         .prove_spell_tx(payload)
         .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string())))?;
     Ok(Json(result))
 }
