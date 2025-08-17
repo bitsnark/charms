@@ -856,7 +856,10 @@ impl ProveSpellTxImpl {
                 let network = match &change_address {
                     a if a.is_valid_for_network(Network::Bitcoin) => Network::Bitcoin,
                     a if a.is_valid_for_network(Network::Testnet4) => Network::Testnet4,
-                    _ => bail!("Invalid change address: {:?}", change_address),
+                    _ => bail!(
+                        "Unsupported network of change address: {:?}",
+                        change_address
+                    ),
                 };
                 ensure!(prove_request.spell.outs.iter().all(|o| {
                     o.address.as_ref().is_some()
@@ -897,10 +900,10 @@ impl ProveSpellTxImpl {
 
                 tracing::info!(total_sats_in, funding_utxo_sats, total_sats_out, charms_fee);
             }
-            CARDANO => {
-                todo!()
-            }
-            _ => unreachable!(),
+            // CARDANO => {
+            //     todo!()
+            // }
+            _ => bail!("unsupported chain: {}", prove_request.chain.as_str()),
         }
         Ok(total_cycles)
     }
