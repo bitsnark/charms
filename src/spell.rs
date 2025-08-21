@@ -674,6 +674,8 @@ impl ProveSpellTxImpl {
 
         let (norm_spell, app_private_inputs, tx_ins_beamed_source_utxos) = spell.normalized()?;
 
+        let binaries = filter_app_binaries(&norm_spell, binaries)?;
+
         let (norm_spell, proof, proof_app_cycles) = self.prover.prove(
             norm_spell,
             binaries,
@@ -726,6 +728,29 @@ impl ProveSpellTxImpl {
             _ => bail!("unsupported chain: {}", chain),
         }
     }
+}
+
+fn filter_app_binaries(
+    norm_spell: &NormalizedSpell,
+    app_binaries: BTreeMap<B32, Vec<u8>>,
+) -> anyhow::Result<BTreeMap<B32, Vec<u8>>> {
+    let vks = norm_spell
+        .app_public_inputs
+        .keys()
+        .map(|app| &app.vk)
+        .collect::<BTreeSet<_>>();
+    let app_binaries: BTreeMap<_, _> = app_binaries
+        .into_iter()
+        .filter(|(vk, _)| vks.contains(vk))
+        .collect();
+    if app_binaries.len() != vks.len() {
+        let missing_vks = vks
+            .into_iter()
+            .filter(|&vk| app_binaries.get(vk).is_none())
+            .collect::<Vec<_>>();
+        bail!("missing app binaries for vks: {:?}", missing_vks);
+    }
+    Ok(app_binaries)
 }
 
 impl ProveSpellTx for ProveSpellTxImpl {
