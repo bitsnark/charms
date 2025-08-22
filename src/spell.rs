@@ -840,6 +840,7 @@ impl ProveSpellTxImpl {
                 let network = match &change_address {
                     a if a.is_valid_for_network(Network::Bitcoin) => Network::Bitcoin,
                     a if a.is_valid_for_network(Network::Testnet4) => Network::Testnet4,
+                    a if a.is_valid_for_network(Network::Regtest) => Network::Regtest,
                     _ => bail!(
                         "Unsupported network of change address: {:?}",
                         change_address
