@@ -8,8 +8,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-charms-data = { path = "../charms-data", version = "0.8.1" }
-charms-client = { path = "../charms-client", version = "0.8.1" }
+charms-data = { path = "../charms-data", version = "0.8.2" }
+charms-client = { path = "../charms-client", version = "0.8.2" }
 serde = { workspace = true, features = ["derive"] }
 sp1-primitives = { workspace = true }
 sp1-zkvm = { workspace = true, features = ["verify"] }
