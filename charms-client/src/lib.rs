@@ -1,16 +1,21 @@
-use crate::tx::{extract_and_verify_spell, EnchantedTx, Tx};
-use charms_data::{check, App, Charms, Data, Transaction, TxId, UtxoId, B32};
+use crate::tx::{EnchantedTx, Tx, extract_and_verify_spell};
+use charms_data::{App, B32, Charms, Data, Transaction, TxId, UtxoId, check};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub use charms_app_runner::{AppProverInput, AppProverOutput};
+
+pub mod ark;
 pub mod bitcoin_tx;
 pub mod cardano_tx;
 pub mod tx;
 
 pub const APP_VK: [u32; 8] = [
-    1428460005, 543013383, 891077755, 1093230882, 45382488, 1416737865, 767648064, 308407145,
+    379943684, 1320425212, 2011087664, 382625374, 62801581, 1553560260, 1934929111, 166204531,
 ];
+
+pub const MOCK_SPELL_VK: &str = "7c38e8639a2eac0074cee920982b92376513e8940f4a7ca6859f17a728af5b0e";
 
 /// Verification key for version `0` of the protocol implemented by `charms-spell-checker` binary.
 pub const V0_SPELL_VK: &str = "0x00e9398ac819e6dd281f81db3ada3fe5159c3cc40222b5ddb0e7584ed2327c5d";
@@ -22,6 +27,8 @@ pub const V2_SPELL_VK: &str = "0x00bd312b6026dbe4a2c16da1e8118d4fea31587a4b572b6
 pub const V3_SPELL_VK: &str = "0x0034872b5af38c95fe82fada696b09a448f7ab0928273b7ac8c58ba29db774b9";
 /// Verification key for version `4` of the protocol implemented by `charms-spell-checker` binary.
 pub const V4_SPELL_VK: &str = "0x00c707a155bf8dc18dc41db2994c214e93e906a3e97b4581db4345b3edd837c5";
+/// Verification key for version `5` of the protocol implemented by `charms-spell-checker` binary.
+pub const V5_SPELL_VK: &str = "0x00e98665c417bd2e6e81c449af63b26ed5ad5c400ef55811b592450bf62c67cd";
 
 /// Version `0` of the protocol.
 pub const V0: u32 = 0u32;
@@ -35,9 +42,11 @@ pub const V3: u32 = 3u32;
 pub const V4: u32 = 4u32;
 /// Version `5` of the protocol.
 pub const V5: u32 = 5u32;
+/// Version `6` of the protocol.
+pub const V6: u32 = 6u32;
 
 /// Current version of the protocol.
-pub const CURRENT_VERSION: u32 = V5;
+pub const CURRENT_VERSION: u32 = V6;
 
 /// Maps the index of the charm's app (in [`NormalizedSpell`].`app_public_inputs`) to the charm's
 /// data.
@@ -52,7 +61,8 @@ pub struct NormalizedTransaction {
     pub ins: Option<Vec<UtxoId>>,
 
     /// Reference UTXO list. **May** be empty.
-    pub refs: BTreeSet<UtxoId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refs: Option<Vec<UtxoId>>,
 
     /// Output charms. **Must** be in the order of the transaction outputs.
     /// When proving spell correctness, we can't know the transaction ID yet.
@@ -61,7 +71,7 @@ pub struct NormalizedTransaction {
     /// **Must not** be larger than the number of outputs in the hosting transaction.
     pub outs: Vec<NormalizedCharms>,
 
-    /// Optional mapping from the beamed output index to the destination UtxoId.
+    /// Optional mapping from the beamed output index to the destination UtxoId hash.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub beamed_outs: Option<BTreeMap<u32, B32>>,
 }
@@ -77,7 +87,7 @@ impl NormalizedTransaction {
 }
 
 /// Proof of spell correctness.
-pub type Proof = Box<[u8]>;
+pub type Proof = Vec<u8>;
 
 /// Normalized representation of a spell.
 /// Can be committed as public input.
@@ -89,6 +99,9 @@ pub struct NormalizedSpell {
     pub tx: NormalizedTransaction,
     /// Maps all `App`s in the transaction to (potentially empty) public input data.
     pub app_public_inputs: BTreeMap<App, Data>,
+    /// Is this a mock spell?
+    #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+    pub mock: bool,
 }
 
 pub fn utxo_id_hash(utxo_id: &UtxoId) -> B32 {
@@ -101,6 +114,7 @@ pub fn utxo_id_hash(utxo_id: &UtxoId) -> B32 {
 pub fn prev_spells(
     prev_txs: &Vec<Tx>,
     spell_vk: &str,
+    mock: bool,
 ) -> BTreeMap<TxId, (Option<NormalizedSpell>, usize)> {
     prev_txs
         .iter()
@@ -109,7 +123,7 @@ pub fn prev_spells(
             (
                 tx_id,
                 (
-                    extract_and_verify_spell(spell_vk, tx)
+                    extract_and_verify_spell(spell_vk, tx, mock)
                         .map_err(|e| {
                             tracing::info!("no correct spell in tx {}: {}", tx_id, e);
                         })
@@ -160,7 +174,12 @@ pub fn well_formed(
     };
     check!(
         tx_ins.iter().all(directly_created_by_prev_txns)
-            && spell.tx.refs.iter().all(directly_created_by_prev_txns)
+            && spell
+                .tx
+                .refs
+                .iter()
+                .flatten()
+                .all(directly_created_by_prev_txns)
     );
     let beamed_source_utxos_point_to_placeholder_dest_utxos = tx_ins_beamed_source_utxos
         .iter()
@@ -232,7 +251,7 @@ pub fn to_tx(
     };
     Transaction {
         ins: tx_ins.iter().map(from_utxo_id).collect(),
-        refs: spell.tx.refs.iter().map(from_utxo_id).collect(),
+        refs: spell.tx.refs.iter().flatten().map(from_utxo_id).collect(),
         outs: spell.tx.outs.iter().map(from_normalized_charms).collect(),
     }
 }
@@ -262,21 +281,6 @@ pub struct SpellProverInput {
     pub tx_ins_beamed_source_utxos: BTreeMap<UtxoId, UtxoId>,
     /// indices of apps in the spell that have contract proofs
     pub app_prover_output: Option<AppProverOutput>, // proof is provided in input stream data
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AppProverInput {
-    pub app_binaries: BTreeMap<B32, Vec<u8>>,
-    pub tx: Transaction,
-    pub app_public_inputs: BTreeMap<App, Data>,
-    pub app_private_inputs: BTreeMap<App, Data>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AppProverOutput {
-    pub tx: Transaction,
-    pub app_public_inputs: BTreeMap<App, Data>,
-    pub cycles: Vec<u64>,
 }
 
 #[cfg(test)]

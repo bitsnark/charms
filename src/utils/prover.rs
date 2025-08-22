@@ -1,6 +1,9 @@
 use sp1_core_machine::io::SP1Stdin;
-use sp1_prover::{components::CpuProverComponents, SP1ProvingKey, SP1VerifyingKey};
-use sp1_sdk::{CpuProver, EnvProver, Prover, SP1ProofMode, SP1ProofWithPublicValues};
+use sp1_prover::{SP1ProvingKey, SP1VerifyingKey, components::CpuProverComponents};
+use sp1_sdk::{
+    CpuProver, NetworkProver, Prover, SP1ProofMode, SP1ProofWithPublicValues,
+    network::FulfillmentStrategy,
+};
 
 pub trait CharmsSP1Prover: Send + Sync {
     fn setup(&self, elf: &[u8]) -> (SP1ProvingKey, SP1VerifyingKey);
@@ -29,7 +32,7 @@ impl CharmsSP1Prover for CpuProver {
     }
 }
 
-impl CharmsSP1Prover for EnvProver {
+impl CharmsSP1Prover for NetworkProver {
     fn setup(&self, elf: &[u8]) -> (SP1ProvingKey, SP1VerifyingKey) {
         let (pk, _, _, vk) = <Self as Prover<CpuProverComponents>>::inner(self).setup(elf);
         (pk, vk)
@@ -41,7 +44,13 @@ impl CharmsSP1Prover for EnvProver {
         stdin: &SP1Stdin,
         kind: SP1ProofMode,
     ) -> anyhow::Result<(SP1ProofWithPublicValues, u64)> {
-        let proof = self.prove(pk, stdin).mode(kind).run()?;
+        let proof = self
+            .prove(pk, stdin)
+            .mode(kind)
+            .cycle_limit(32000000)
+            .skip_simulation(true)
+            .strategy(FulfillmentStrategy::Hosted)
+            .run()?;
         Ok((proof, 0))
     }
 }

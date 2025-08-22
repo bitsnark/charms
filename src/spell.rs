@@ -1,32 +1,43 @@
 use crate::{
-    app,
-    tx::{bitcoin_tx, txs_by_txid},
+    SPELL_CHECKER_BINARY, app,
+    cli::{BITCOIN, CARDANO, charms_fee_settings, prove_impl},
+    tx::{bitcoin_tx, cardano_tx, txs_by_txid},
     utils,
     utils::{BoxedSP1Prover, Shared},
-    SPELL_CHECKER_BINARY, SPELL_VK,
 };
-#[cfg(feature = "prover")]
-use crate::{
-    cli::{BITCOIN, CARDANO},
-    tx::cardano_tx,
+use anyhow::{anyhow, bail, ensure};
+use ark_bls12_381::Bls12_381;
+use ark_ec::pairing::Pairing;
+use ark_ff::{Field, ToConstraintField};
+use ark_groth16::{Groth16, ProvingKey};
+use ark_relations::{
+    lc, r1cs,
+    r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable::One},
 };
-use anyhow::{anyhow, ensure, Error};
-use bitcoin::{hashes::Hash, Amount};
-#[cfg(not(feature = "prover"))]
-use charms_client::bitcoin_tx::BitcoinTx;
-use charms_client::tx::Tx;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use ark_snark::SNARK;
+use ark_std::{
+    rand::{RngCore, SeedableRng},
+    test_rng,
+};
+use bitcoin::{Amount, Network, hashes::Hash};
+use charms_app_runner::AppRunner;
+use charms_client::{AppProverOutput, MOCK_SPELL_VK, bitcoin_tx::BitcoinTx, tx::Tx, well_formed};
 pub use charms_client::{
-    to_tx, NormalizedCharms, NormalizedSpell, NormalizedTransaction, Proof, SpellProverInput,
-    CURRENT_VERSION,
+    CURRENT_VERSION, NormalizedCharms, NormalizedSpell, NormalizedTransaction, Proof,
+    SpellProverInput, to_tx,
 };
-use charms_data::{util, App, Charms, Data, Transaction, TxId, UtxoId, B32};
+use charms_data::{App, B32, Charms, Data, Transaction, TxId, UtxoId, util};
+use charms_lib::SPELL_VK;
 #[cfg(not(feature = "prover"))]
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_with::{base64::Base64, serde_as, IfIsHumanReadable};
+use serde_with::{IfIsHumanReadable, base64::Base64, serde_as};
+use sha2::{Digest, Sha256};
 use sp1_sdk::{SP1ProofMode, SP1Stdin};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    str::FromStr,
     sync::Arc,
 };
 
@@ -113,7 +124,7 @@ impl Spell {
         Ok(Transaction { ins, refs, outs })
     }
 
-    fn strings_of_charms(&self, inputs: &Vec<Input>) -> anyhow::Result<BTreeMap<UtxoId, Charms>> {
+    fn strings_of_charms(&self, inputs: &Vec<Input>) -> anyhow::Result<Vec<(UtxoId, Charms)>> {
         inputs
             .iter()
             .map(|input| {
@@ -147,6 +158,8 @@ impl Spell {
         BTreeMap<App, Data>,
         BTreeMap<UtxoId, UtxoId>,
     )> {
+        ensure!(self.version == CURRENT_VERSION);
+
         let empty_map = BTreeMap::new();
         let keyed_public_inputs = self.public_args.as_ref().unwrap_or(&empty_map);
 
@@ -168,13 +181,15 @@ impl Spell {
         );
         let ins = Some(ins);
 
-        let empty_vec = vec![];
-        let self_refs = self.refs.as_ref().unwrap_or(&empty_vec);
-        let refs: BTreeSet<UtxoId> = self_refs
-            .iter()
-            .map(|utxo| utxo.utxo_id.clone().ok_or(anyhow!("missing input utxo_id")))
-            .collect::<Result<_, _>>()?;
-        ensure!(refs.len() == self_refs.len(), "duplicate reference inputs");
+        let refs = self
+            .refs
+            .as_ref()
+            .map(|refs| {
+                refs.iter()
+                    .map(|utxo| utxo.utxo_id.clone().ok_or(anyhow!("missing input utxo_id")))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?;
 
         let empty_charm = KeyedCharms::new();
 
@@ -191,13 +206,13 @@ impl Spell {
                         let app = keyed_apps.get(k).ok_or(anyhow!("missing app key"))?;
                         let i = *app_to_index
                             .get(app)
-                            .expect("app should be in app_to_index");
-                        Ok((i, Data::from(v)))
+                            .ok_or(anyhow!("app is expected to be in app_to_index"))?;
+                        Ok((i, v.clone()))
                     })
-                    .collect::<Result<NormalizedCharms, Error>>()?;
+                    .collect::<anyhow::Result<NormalizedCharms>>()?;
                 Ok(n_charms)
             })
-            .collect::<Result<_, Error>>()?;
+            .collect::<anyhow::Result<_>>()?;
 
         let beamed_outs: BTreeMap<_, _> = self
             .outs
@@ -216,6 +231,7 @@ impl Spell {
                 beamed_outs,
             },
             app_public_inputs,
+            mock: false,
         };
 
         let keyed_private_inputs = self.private_args.as_ref().unwrap_or(&empty_map);
@@ -228,7 +244,7 @@ impl Spell {
                 let tx_in = input
                     .utxo_id
                     .as_ref()
-                    .expect("inputs should have utxo_id set")
+                    .expect("inputs are expected to have utxo_id set")
                     .clone();
                 input
                     .beamed_from
@@ -242,20 +258,19 @@ impl Spell {
 
     /// De-normalize a normalized spell.
     #[tracing::instrument(level = "debug", skip_all)]
-    pub fn denormalized(norm_spell: &NormalizedSpell) -> Self {
+    pub fn denormalized(norm_spell: &NormalizedSpell) -> anyhow::Result<Self> {
         let apps = (0..)
             .zip(norm_spell.app_public_inputs.keys())
             .map(|(i, app)| (utils::str_index(&i), app.clone()))
             .collect();
 
-        let public_inputs = match (0..)
-            .zip(norm_spell.app_public_inputs.values())
+        let public_inputs = match norm_spell
+            .app_public_inputs
+            .values()
+            .enumerate()
             .filter_map(|(i, data)| match data {
                 data if data.is_empty() => None,
-                data => Some((
-                    utils::str_index(&i),
-                    data.value().ok().expect("Data should be a Value"),
-                )),
+                data => Some((utils::str_index(&(i as u32)), data.clone())),
             })
             .collect::<BTreeMap<_, _>>()
         {
@@ -264,7 +279,7 @@ impl Spell {
         };
 
         let Some(norm_spell_ins) = &norm_spell.tx.ins else {
-            unreachable!("spell must have inputs");
+            bail!("spell must have inputs");
         };
         let ins = norm_spell_ins
             .iter()
@@ -275,20 +290,15 @@ impl Spell {
             })
             .collect();
 
-        let refs = match norm_spell
-            .tx
-            .refs
-            .iter()
-            .map(|utxo_id| Input {
-                utxo_id: Some(utxo_id.clone()),
-                charms: None,
-                beamed_from: None,
-            })
-            .collect::<Vec<_>>()
-        {
-            refs if refs.is_empty() => None,
-            refs => Some(refs),
-        };
+        let refs = norm_spell.tx.refs.as_ref().map(|refs| {
+            refs.iter()
+                .map(|utxo_id| Input {
+                    utxo_id: Some(utxo_id.clone()),
+                    charms: None,
+                    beamed_from: None,
+                })
+                .collect::<Vec<_>>()
+        });
 
         let outs = norm_spell
             .tx
@@ -300,12 +310,7 @@ impl Spell {
                 amount: None,
                 charms: match n_charms
                     .iter()
-                    .map(|(i, data)| {
-                        (
-                            utils::str_index(i),
-                            data.value().ok().expect("Data should be a Value"),
-                        )
-                    })
+                    .map(|(i, data)| (utils::str_index(i), data.clone()))
                     .collect::<KeyedCharms>()
                 {
                     charms if charms.is_empty() => None,
@@ -319,7 +324,7 @@ impl Spell {
             })
             .collect();
 
-        Self {
+        Ok(Self {
             version: norm_spell.version,
             apps,
             public_args: public_inputs,
@@ -327,7 +332,7 @@ impl Spell {
             ins,
             refs,
             outs,
-        }
+        })
     }
 }
 
@@ -346,7 +351,7 @@ fn app_inputs(
         .collect()
 }
 
-pub trait Prove {
+pub trait Prove: Send + Sync {
     /// Prove the correctness of a spell, generate the proof.
     ///
     /// This function generates a proof that a spell (`NormalizedSpell`) is correct.
@@ -372,7 +377,8 @@ pub trait Prove {
     ///
     /// # Returns
     /// - `Ok((NormalizedSpell, Proof, u64))`: On success, returns a tuple containing:
-    ///   * The original `NormalizedSpell` object that was proven.
+    ///   * The original `NormalizedSpell` object that was proven in its onchain form (i.e. without
+    ///     the inputs, since they are already specified by the transaction).
     ///   * The generated `Proof` object, which provides evidence of correctness for the spell.
     ///   * A `u64` value indicating the total number of cycles consumed during the proving process.
     /// - `Err(anyhow::Error)`: Returns an error if the proving process fails due to validation
@@ -404,9 +410,14 @@ impl Prove for Prover {
         prev_txs: Vec<Tx>,
         tx_ins_beamed_source_utxos: BTreeMap<UtxoId, UtxoId>,
     ) -> anyhow::Result<(NormalizedSpell, Proof, u64)> {
+        ensure!(
+            !norm_spell.mock,
+            "trying to prove a mock spell with a real prover"
+        );
+
         let mut stdin = SP1Stdin::new();
 
-        let prev_spells = charms_client::prev_spells(&prev_txs, SPELL_VK);
+        let prev_spells = charms_client::prev_spells(&prev_txs, SPELL_VK, false);
         let tx = to_tx(&norm_spell, &prev_spells, &tx_ins_beamed_source_utxos);
 
         let app_prover_output = self.app_prover.prove(
@@ -437,13 +448,118 @@ impl Prove for Prover {
             self.prover_client
                 .get()
                 .prove(&pk, &stdin, SP1ProofMode::Groth16)?;
-        let proof = proof.bytes().into_boxed_slice();
+        let proof = proof.bytes();
 
-        let mut norm_spell2 = norm_spell;
-        norm_spell2.tx.ins = None;
+        let norm_spell = clear_inputs(norm_spell);
 
         // TODO app_cycles might turn out to be much more expensive than spell_cycles
-        Ok((norm_spell2, proof, app_cycles + spell_cycles))
+        Ok((norm_spell, proof, app_cycles + spell_cycles))
+    }
+}
+
+fn make_mock(mut norm_spell: NormalizedSpell) -> NormalizedSpell {
+    norm_spell.mock = true;
+    norm_spell
+}
+
+fn clear_inputs(mut norm_spell: NormalizedSpell) -> NormalizedSpell {
+    norm_spell.tx.ins = None;
+    norm_spell
+}
+
+impl Prove for MockProver {
+    fn prove(
+        &self,
+        norm_spell: NormalizedSpell,
+        app_binaries: BTreeMap<B32, Vec<u8>>,
+        app_private_inputs: BTreeMap<App, Data>,
+        prev_txs: Vec<Tx>,
+        tx_ins_beamed_source_utxos: BTreeMap<UtxoId, UtxoId>,
+    ) -> anyhow::Result<(NormalizedSpell, Proof, u64)> {
+        let norm_spell = make_mock(norm_spell);
+
+        let prev_spells = charms_client::prev_spells(&prev_txs, SPELL_VK, true);
+
+        let app_prover_output = match app_binaries.is_empty() {
+            true => None,
+            false => {
+                let tx = to_tx(&norm_spell, &prev_spells, &tx_ins_beamed_source_utxos);
+                // prove charms-app-checker run
+                let cycles = self.app_runner.run_all(
+                    &app_binaries,
+                    &tx,
+                    &norm_spell.app_public_inputs,
+                    &app_private_inputs,
+                )?;
+                Some(AppProverOutput {
+                    tx,
+                    app_public_inputs: norm_spell.app_public_inputs.clone(),
+                    cycles,
+                })
+            }
+        };
+
+        let app_cycles = app_prover_output
+            .as_ref()
+            .map(|o| o.cycles.iter().sum())
+            .unwrap_or(0);
+
+        // prove charms-spell-checker run
+        ensure!(
+            charms_client::well_formed(&norm_spell, &prev_spells, &tx_ins_beamed_source_utxos),
+            "spell is not well-formed"
+        );
+
+        // replace with good randomness in non-mock mode
+        let mut rng = ark_std::rand::rngs::StdRng::seed_from_u64(test_rng().next_u64());
+
+        // Create parameters for our circuit
+        let pk = load_pk()?;
+
+        let committed_data = util::write(&(MOCK_SPELL_VK, norm_spell.clone()))?;
+
+        let field_elements = Sha256::digest(&committed_data)
+            .to_field_elements()
+            .expect("non-empty vector is expected");
+        let circuit = DummyCircuit {
+            a: Some(field_elements[0]),
+        };
+
+        let proof = Groth16::<Bls12_381>::prove(&pk, circuit, &mut rng)?;
+        let mut proof_bytes = vec![];
+        proof.serialize_compressed(&mut proof_bytes)?;
+
+        let (proof, spell_cycles) = (proof_bytes, 0);
+
+        let norm_spell = clear_inputs(norm_spell);
+
+        Ok((norm_spell, proof, app_cycles + spell_cycles))
+    }
+}
+
+fn load_pk<E: Pairing>() -> anyhow::Result<ProvingKey<E>> {
+    ProvingKey::deserialize_compressed(MOCK_GROTH16_PK)
+        .map_err(|e| anyhow!("Failed to deserialize proving key: {}", e))
+}
+
+const MOCK_GROTH16_PK: &[u8] = include_bytes!("./bin/mock-groth16-pk.bin");
+
+#[derive(Default)]
+pub struct DummyCircuit<F>
+where
+    F: Field,
+{
+    a: Option<F>,
+}
+
+impl<ConstraintF> ConstraintSynthesizer<ConstraintF> for DummyCircuit<ConstraintF>
+where
+    ConstraintF: Field,
+{
+    fn generate_constraints(self, cs: ConstraintSystemRef<ConstraintF>) -> r1cs::Result<()> {
+        let a = cs.new_witness_variable(|| self.a.ok_or(SynthesisError::AssignmentMissing))?;
+        let c = cs.new_input_variable(|| self.a.ok_or(SynthesisError::AssignmentMissing))?;
+        cs.enforce_constraint(lc!() + a, lc!() + One, lc!() + c)
     }
 }
 
@@ -473,18 +589,47 @@ $TOAD: 9
     }
 }
 
-pub trait ProveSpellTx {
+pub trait ProveSpellTx: Send + Sync {
+    fn new(mock: bool) -> Self;
+
     fn prove_spell_tx(
         &self,
         prove_request: ProveRequest,
-    ) -> impl std::future::Future<Output = anyhow::Result<Vec<String>>>;
+    ) -> impl Future<Output = anyhow::Result<Vec<String>>>;
 }
+
+pub struct ProveSpellTxImpl {
+    pub mock: bool,
+
+    pub charms_fee_settings: Option<CharmsFee>,
+    pub charms_prove_api_url: String,
+
+    pub prover: Box<dyn Prove>,
+    #[cfg(not(feature = "prover"))]
+    pub client: Client,
+}
+
+pub type FeeAddressForNetwork = BTreeMap<String, String>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CharmsFee {
-    pub fee_address: String,
+    /// Fee addresses for each chain (bitcoin, cardano, etc.) further broken down by network
+    /// (mainnet, testnet, etc.).
+    pub fee_addresses: BTreeMap<String, FeeAddressForNetwork>,
+    /// Fee rate in sats per mega cycle.
     pub fee_rate: u64,
+    /// Base fee in sats.
     pub fee_base: u64,
+}
+
+impl CharmsFee {
+    pub fn fee_address(&self, chain: &str, network: &str) -> Option<&str> {
+        self.fee_addresses.get(chain).and_then(|fee_addresses| {
+            fee_addresses
+                .get(network)
+                .map(|fee_address| fee_address.as_str())
+        })
+    }
 }
 
 #[serde_as]
@@ -498,24 +643,22 @@ pub struct ProveRequest {
     pub funding_utxo_value: u64,
     pub change_address: String,
     pub fee_rate: f64,
-    pub charms_fee: Option<CharmsFee>,
     pub chain: String,
 }
 
 pub struct Prover {
     pub app_prover: Arc<app::Prover>,
     pub prover_client: Arc<Shared<BoxedSP1Prover>>,
-    pub charms_fee_settings: Option<CharmsFee>,
-    pub charms_prove_api_url: String,
-    #[cfg(not(feature = "prover"))]
-    pub client: Client,
 }
 
-impl ProveSpellTx for Prover {
-    #[cfg(feature = "prover")]
-    async fn prove_spell_tx(
-        &self,
-        ProveRequest {
+pub struct MockProver {
+    pub app_runner: Arc<AppRunner>,
+}
+
+impl ProveSpellTxImpl {
+    async fn do_prove_spell_tx(&self, prove_request: ProveRequest) -> anyhow::Result<Vec<String>> {
+        let total_app_cycles = self.validate_prove_request(&prove_request)?;
+        let ProveRequest {
             spell,
             binaries,
             prev_txs,
@@ -523,25 +666,15 @@ impl ProveSpellTx for Prover {
             funding_utxo_value,
             change_address,
             fee_rate,
-            charms_fee,
             chain,
-        }: ProveRequest,
-    ) -> anyhow::Result<Vec<String>> {
+        } = prove_request;
+
         let prev_txs = from_hex_txs(&prev_txs)?;
         let prev_txs_by_id = txs_by_txid(&prev_txs);
 
-        let all_inputs_produced_by_prev_txs = spell
-            .ins
-            .iter()
-            .all(|input| prev_txs_by_id.contains_key(&input.utxo_id.as_ref().unwrap().0));
-        ensure!(
-            all_inputs_produced_by_prev_txs,
-            "prev_txs must include transactions for all inputs"
-        );
-
         let (norm_spell, app_private_inputs, tx_ins_beamed_source_utxos) = spell.normalized()?;
 
-        let (norm_spell, proof, total_cycles) = self.prove(
+        let (norm_spell, proof, proof_app_cycles) = self.prover.prove(
             norm_spell,
             binaries,
             app_private_inputs,
@@ -549,10 +682,18 @@ impl ProveSpellTx for Prover {
             tx_ins_beamed_source_utxos,
         )?;
 
-        tracing::info!("proof generated. total cycles: {}", total_cycles,);
+        let total_cycles = if !self.mock {
+            total_app_cycles
+        } else {
+            proof_app_cycles // mock prover computes app run cycles
+        };
+
+        tracing::info!("proof generated. total app cycles: {}", total_cycles);
 
         // Serialize spell into CBOR
         let spell_data = util::write(&(&norm_spell, &proof))?;
+
+        let charms_fee = self.charms_fee_settings.clone();
 
         match chain.as_str() {
             BITCOIN => {
@@ -577,19 +718,59 @@ impl ProveSpellTx for Prover {
                     &change_address,
                     &spell_data,
                     &prev_txs_by_id,
+                    charms_fee,
+                    total_cycles,
                 )?;
                 Ok(to_hex_txs(&txs))
             }
-            _ => unreachable!(),
+            _ => bail!("unsupported chain: {}", chain),
         }
+    }
+}
+
+impl ProveSpellTx for ProveSpellTxImpl {
+    #[tracing::instrument(level = "debug")]
+    fn new(mock: bool) -> Self {
+        let charms_fee_settings = charms_fee_settings();
+
+        let charms_prove_api_url = std::env::var("CHARMS_PROVE_API_URL")
+            .ok()
+            .unwrap_or("https://prove.charms.dev/spells/prove".to_string());
+
+        let prover = prove_impl(mock);
+
+        #[cfg(not(feature = "prover"))]
+        let client = Client::builder()
+            .use_rustls_tls() // avoids system OpenSSL issues
+            .http2_prior_knowledge()
+            .http2_adaptive_window(true)
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .build()
+            .expect("HTTP client should be created successfully");
+
+        Self {
+            mock,
+            charms_fee_settings,
+            charms_prove_api_url,
+            prover,
+            #[cfg(not(feature = "prover"))]
+            client,
+        }
+    }
+
+    #[cfg(feature = "prover")]
+    async fn prove_spell_tx(&self, prove_request: ProveRequest) -> anyhow::Result<Vec<String>> {
+        self.do_prove_spell_tx(prove_request).await
     }
 
     #[cfg(not(feature = "prover"))]
     #[tracing::instrument(level = "info", skip_all)]
     async fn prove_spell_tx(&self, prove_request: ProveRequest) -> anyhow::Result<Vec<String>> {
-        let prove_request = self.add_fee(prove_request);
-        self.validate_prove_request(&prove_request)?;
+        if self.mock {
+            return Self::do_prove_spell_tx(self, prove_request).await;
+        }
 
+        self.validate_prove_request(&prove_request)?;
         let response = self
             .client
             .post(&self.charms_prove_api_url)
@@ -601,80 +782,119 @@ impl ProveSpellTx for Prover {
     }
 }
 
-impl Prover {
-    #[cfg(not(feature = "prover"))]
-    fn add_fee(&self, prove_request: ProveRequest) -> ProveRequest {
-        let mut prove_request = prove_request;
-        prove_request.charms_fee = self.charms_fee_settings.clone();
-        prove_request
-    }
+fn ensure_all_prev_txs_are_present(
+    spell: &NormalizedSpell,
+    tx_ins_beamed_source_utxos: &BTreeMap<UtxoId, UtxoId>,
+    prev_txs_by_id: &BTreeMap<TxId, Tx>,
+) -> anyhow::Result<()> {
+    ensure!(spell.tx.ins.as_ref().is_some_and(|ins| {
+        ins.iter()
+            .all(|utxo_id| prev_txs_by_id.contains_key(&utxo_id.0))
+    }));
+    ensure!(spell.tx.refs.as_ref().is_none_or(|ins| {
+        ins.iter()
+            .all(|utxo_id| prev_txs_by_id.contains_key(&utxo_id.0))
+    }));
+    ensure!(
+        tx_ins_beamed_source_utxos
+            .iter()
+            .all(|(utxo_id, beaming_source_utxo_id)| {
+                prev_txs_by_id.contains_key(&utxo_id.0)
+                    && prev_txs_by_id.contains_key(&beaming_source_utxo_id.0)
+            })
+    );
+    Ok(())
+}
 
-    #[cfg(not(feature = "prover"))]
-    fn validate_prove_request(&self, prove_request: &ProveRequest) -> Result<(), Error> {
+impl ProveSpellTxImpl {
+    pub fn validate_prove_request(&self, prove_request: &ProveRequest) -> anyhow::Result<u64> {
         let prev_txs = &prove_request.prev_txs;
         let prev_txs = from_hex_txs(&prev_txs)?;
         let prev_txs_by_id = txs_by_txid(&prev_txs);
 
-        // TODO either make this cross-chain or delete
-        let tx = bitcoin_tx::from_spell(&prove_request.spell)?;
-        // let encoded_tx = EncodedTx::Bitcoin(BitcoinTx(tx.clone()));
-        ensure!(tx
-            .0
-            .input
-            .iter()
-            .all(|input| prev_txs_by_id
-                .contains_key(&TxId(input.previous_output.txid.to_byte_array()))));
+        let (norm_spell, app_private_inputs, tx_ins_beamed_source_utxos) =
+            prove_request.spell.normalized()?;
+        ensure_all_prev_txs_are_present(&norm_spell, &tx_ins_beamed_source_utxos, &prev_txs_by_id)?;
 
-        // let (norm_spell, app_private_inputs, tx_ins_beamed_source_utxos) =
-        //     prove_request.spell.normalized()?;
+        let prev_spells = charms_client::prev_spells(&prev_txs, SPELL_VK, self.mock);
 
-        // let prev_spells = charms_client::prev_spells(&prev_txs, SPELL_VK);
-        // let charms_tx = to_tx(&norm_spell, &prev_spells, &tx_ins_beamed_source_utxos);
+        let tx = to_tx(&norm_spell, &prev_spells, &tx_ins_beamed_source_utxos);
+        // prove charms-app-checker run
+        let cycles = AppRunner::new(true).run_all(
+            &prove_request.binaries,
+            &tx,
+            &norm_spell.app_public_inputs,
+            &app_private_inputs,
+        )?;
+        let total_cycles = cycles.iter().sum();
+        ensure!(well_formed(
+            &norm_spell,
+            &prev_spells,
+            &tx_ins_beamed_source_utxos
+        ));
 
-        // let expected_cycles = self.app_prover.run_all(
-        //     &prove_request.binaries,
-        //     &charms_tx,
-        //     &norm_spell.app_public_inputs,
-        //     &app_private_inputs,
-        //     None,
-        // )?;
-        // let total_app_cycles: u64 = expected_cycles.iter().sum();
+        match prove_request.chain.as_str() {
+            BITCOIN => {
+                let change_address = bitcoin::Address::from_str(&prove_request.change_address)?;
 
-        let charms_fee = get_charms_fee(prove_request.charms_fee.clone(), 8000000).to_sat();
+                let network = match &change_address {
+                    a if a.is_valid_for_network(Network::Bitcoin) => Network::Bitcoin,
+                    a if a.is_valid_for_network(Network::Testnet4) => Network::Testnet4,
+                    a if a.is_valid_for_network(Network::Regtest) => Network::Regtest,
+                    _ => bail!(
+                        "Unsupported network of change address: {:?}",
+                        change_address
+                    ),
+                };
+                ensure!(prove_request.spell.outs.iter().all(|o| {
+                    o.address.as_ref().is_some_and(|a| {
+                        bitcoin::Address::from_str(a).is_ok_and(|a| a.is_valid_for_network(network))
+                    })
+                }));
 
-        let total_sats_in =
-            tx.0.input
-                .iter()
-                .map(|i| {
-                    prev_txs_by_id
-                        .get(&TxId(i.previous_output.txid.to_byte_array()))
-                        .map(|prev_tx| {
-                            let Tx::Bitcoin(BitcoinTx(prev_tx)) = prev_tx else {
-                                unreachable!()
-                            };
-                            prev_tx.output[i.previous_output.vout as usize].value
-                        })
-                        .unwrap_or_default()
-                })
-                .sum::<Amount>()
-                .to_sat();
-        let total_sats_out = tx.0.output.iter().map(|o| o.value).sum::<Amount>().to_sat();
+                let charms_fee = get_charms_fee(&self.charms_fee_settings, total_cycles).to_sat();
 
-        let funding_utxo_sats = prove_request.funding_utxo_value;
+                let total_sats_in: u64 = (&prove_request.spell.ins)
+                    .iter()
+                    .map(|i| {
+                        let utxo_id = i.utxo_id.as_ref().expect("utxo_id is expected to be Some");
+                        prev_txs_by_id
+                            .get(&utxo_id.0)
+                            .and_then(|prev_tx| {
+                                if let Tx::Bitcoin(BitcoinTx(prev_tx)) = prev_tx {
+                                    prev_tx
+                                        .output
+                                        .get(utxo_id.1 as usize)
+                                        .map(|o| o.value.to_sat())
+                                } else {
+                                    None
+                                }
+                            })
+                            .ok_or(anyhow!("utxo not found in prev_txs: {}", utxo_id))
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()?
+                    .iter()
+                    .sum();
+                let total_sats_out: u64 = (&prove_request.spell.outs)
+                    .iter()
+                    .map(|o| o.amount.unwrap_or_default())
+                    .sum();
 
-        ensure!(
-            total_sats_in + funding_utxo_sats > total_sats_out + charms_fee,
-            "total input value must be greater than total output value plus charms fee"
-        );
+                let funding_utxo_sats = prove_request.funding_utxo_value;
 
-        tracing::info!(
-            "tx input sats: {}, funding utxo sats: {}, total output sats: {}, charms fee estimate: {}",
-            total_sats_in,
-            funding_utxo_sats,
-            total_sats_out,
-            charms_fee
-        );
-        Ok(())
+                ensure!(
+                    total_sats_in + funding_utxo_sats > total_sats_out + charms_fee,
+                    "total input value must be greater than total output value plus charms fee"
+                );
+
+                tracing::info!(total_sats_in, funding_utxo_sats, total_sats_out, charms_fee);
+            }
+            // CARDANO => {
+            //     todo!()
+            // }
+            _ => bail!("unsupported chain: {}", prove_request.chain.as_str()),
+        }
+        Ok(total_cycles)
     }
 }
 
@@ -686,7 +906,7 @@ pub fn to_hex_txs(txs: &[Tx]) -> Vec<String> {
     txs.iter().map(|tx| tx.hex()).collect()
 }
 
-pub fn get_charms_fee(charms_fee: Option<CharmsFee>, total_cycles: u64) -> Amount {
+pub fn get_charms_fee(charms_fee: &Option<CharmsFee>, total_cycles: u64) -> Amount {
     charms_fee
         .as_ref()
         .map(|charms_fee| {

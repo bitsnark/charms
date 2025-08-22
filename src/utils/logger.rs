@@ -2,7 +2,7 @@ use std::sync::Once;
 
 use tracing_forest::ForestLayer;
 use tracing_subscriber::{
-    fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry,
+    EnvFilter, Registry, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt,
 };
 
 static INIT: Once = Once::new();

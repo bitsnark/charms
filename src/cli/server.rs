@@ -1,25 +1,21 @@
 use crate::{
     cli::ServerConfig,
-    spell::{ProveRequest, ProveSpellTx, Prover, Spell},
-    tx::norm_spell,
-    utils::AsyncShared,
+    spell::{ProveRequest, ProveSpellTx, ProveSpellTxImpl},
 };
 use anyhow::Result;
 use axum::{
-    extract::{Path, State},
-    http::StatusCode,
-    routing::{get, post, put},
     Json, Router,
+    extract::State,
+    http::StatusCode,
+    routing::{get, post},
 };
-use charms_client::tx::{EnchantedTx, Tx};
-use charms_data::TxId;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 use tower_http::cors::{Any, CorsLayer};
 
 pub struct Server {
     pub config: ServerConfig,
-    pub prover: Arc<AsyncShared<Prover>>,
+    pub prover: Arc<ProveSpellTxImpl>,
 }
 
 // Types
@@ -46,7 +42,7 @@ fn cors_layer() -> CorsLayer {
 }
 
 impl Server {
-    pub fn new(config: ServerConfig, prover: AsyncShared<Prover>) -> Self {
+    pub fn new(config: ServerConfig, prover: ProveSpellTxImpl) -> Self {
         let prover = Arc::new(prover);
         Self { config, prover }
     }
@@ -56,7 +52,6 @@ impl Server {
 
         // Build router with CORS middleware
         let app = Router::new();
-        let app = app.route("/spells/{txid}", put(show_spell_for_tx_hex));
         let app = app
             .route("/spells/prove", post(prove_spell))
             .with_state(self.prover.clone())
@@ -73,53 +68,15 @@ impl Server {
     }
 }
 
-// Handlers
-
-#[tracing::instrument(level = "debug", skip_all)]
-async fn show_spell_for_tx_hex(
-    Path(txid): Path<String>,
-    Json(payload): Json<ShowSpellRequest>,
-) -> Result<Json<Spell>, StatusCode> {
-    show_spell(&txid, &payload).map(Json)
-}
-
 // #[axum_macros::debug_handler]
 #[tracing::instrument(level = "debug", skip_all)]
 async fn prove_spell(
-    State(prover): State<Arc<AsyncShared<Prover>>>,
+    State(prover): State<Arc<ProveSpellTxImpl>>,
     Json(payload): Json<ProveRequest>,
-) -> Result<Json<Vec<String>>, StatusCode> {
+) -> Result<Json<Vec<String>>, (StatusCode, Json<String>)> {
     let result = prover
-        .get()
-        .await
         .prove_spell_tx(payload)
         .await
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+        .map_err(|e| (StatusCode::BAD_REQUEST, Json(e.to_string())))?;
     Ok(Json(result))
-}
-
-fn show_spell(txid: &str, request: &ShowSpellRequest) -> Result<Spell, StatusCode> {
-    let txid = TxId::from_str(txid).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let tx = Tx::from_hex(&request.tx_hex).map_err(|_| StatusCode::BAD_REQUEST)?;
-    match &tx {
-        Tx::Bitcoin(bitcoin_tx) => {
-            if bitcoin_tx.tx_id() != txid {
-                return Err(StatusCode::BAD_REQUEST);
-            }
-        }
-        Tx::Cardano(cardano_tx) => {
-            if cardano_tx.tx_id() != txid {
-                return Err(StatusCode::BAD_REQUEST);
-            }
-        }
-    }
-
-    extract_spell(&tx)
-}
-
-fn extract_spell(tx: &Tx) -> Result<Spell, StatusCode> {
-    match norm_spell(tx) {
-        None => Err(StatusCode::NO_CONTENT),
-        Some(spell) => Ok(Spell::denormalized(&spell)),
-    }
 }

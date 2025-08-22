@@ -1,15 +1,14 @@
-use crate::{tx::EnchantedTx, NormalizedSpell, Proof};
+use crate::{NormalizedSpell, Proof, tx, tx::EnchantedTx};
 use anyhow::{anyhow, bail, ensure};
 use bitcoin::{
+    TxIn,
     consensus::encode::{deserialize_hex, serialize_hex},
     hashes::Hash,
     opcodes::all::{OP_ENDIF, OP_IF},
     script::{Instruction, PushBytes},
-    TxIn,
 };
-use charms_data::{util, TxId, UtxoId};
+use charms_data::{TxId, UtxoId, util};
 use serde::{Deserialize, Serialize};
-use sp1_verifier::Groth16Verifier;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BitcoinTx(pub bitcoin::Transaction);
@@ -22,7 +21,11 @@ impl BitcoinTx {
 }
 
 impl EnchantedTx for BitcoinTx {
-    fn extract_and_verify_spell(&self, spell_vk: &str) -> anyhow::Result<NormalizedSpell> {
+    fn extract_and_verify_spell(
+        &self,
+        spell_vk: &str,
+        mock: bool,
+    ) -> anyhow::Result<NormalizedSpell> {
         let tx = &self.0;
 
         let Some((spell_tx_in, tx_ins)) = tx.input.split_last() else {
@@ -31,26 +34,25 @@ impl EnchantedTx for BitcoinTx {
 
         let (spell, proof) = parse_spell_and_proof(spell_tx_in)?;
 
+        if !mock {
+            ensure!(!spell.mock, "spell is a mock, but we are not in mock mode");
+        }
         ensure!(
-            &spell.tx.ins.is_none(),
+            spell.tx.ins.is_none(),
             "spell must inherit inputs from the enchanted tx"
         );
         ensure!(
-            &spell.tx.outs.len() <= &tx.output.len(),
+            spell.tx.outs.len() <= tx.output.len(),
             "spell tx outs mismatch"
         );
 
         let spell = spell_with_ins(spell, tx_ins);
 
-        let (spell_vk, groth16_vk) = crate::tx::vks(spell.version, spell_vk)?;
+        let spell_vk = tx::spell_vk(spell.version, spell_vk, spell.mock)?;
 
-        Groth16Verifier::verify(
-            &proof,
-            crate::tx::to_sp1_pv(spell.version, &(spell_vk, &spell)).as_slice(),
-            spell_vk,
-            groth16_vk,
-        )
-        .map_err(|e| anyhow!("could not verify spell proof: {}", e))?;
+        let public_values = tx::to_serialized_pv(spell.version, &(spell_vk, &spell));
+
+        tx::verify_snark_proof(&proof, &public_values, spell_vk, spell.version, spell.mock)?;
 
         Ok(spell)
     }

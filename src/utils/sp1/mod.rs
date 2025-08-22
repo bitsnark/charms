@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use sp1_core_machine::io::SP1Stdin;
-use sp1_prover::{components::CpuProverComponents, SP1Prover};
+use sp1_prover::{SP1Prover, components::CpuProverComponents};
 
 use crate::utils::{prover::CharmsSP1Prover, sp1::cuda::SP1CudaProver};
 use sp1_sdk::{

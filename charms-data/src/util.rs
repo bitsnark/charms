@@ -1,7 +1,7 @@
 use anyhow::Result;
 use ciborium_io::Read;
 use core::fmt::Debug;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 /// Deserialize a CBOR value from a reader (e.g. `&[u8]` or `std::io::stdin()`).
 pub fn read<T, R>(s: R) -> Result<T>

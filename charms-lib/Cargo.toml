@@ -1,0 +1,19 @@
+[package]
+name = "charms-lib"
+description = "Charms Wasm Library"
+
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+charms-client = { path = "../charms-client", version = "0.8.1" }
+serde-wasm-bindgen = { version = "0.6.5" }
+wasm-bindgen = { version = "0.2.100" }
+
+[dev-dependencies]
+serde_json = { workspace = true }

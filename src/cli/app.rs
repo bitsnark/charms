@@ -1,7 +1,7 @@
-pub(crate) use crate::{app::Prover, spell::Spell};
-use anyhow::{anyhow, ensure, Result};
+use crate::spell::Spell;
+use anyhow::{Result, anyhow, ensure};
 use charms_app_runner::AppRunner;
-use charms_data::{Data, B32};
+use charms_data::{B32, Data};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
@@ -88,7 +88,7 @@ pub fn run(spell: PathBuf, path: Option<PathBuf>) -> Result<()> {
             fs::read(bin_path)?
         }
     };
-    let app_runner = AppRunner::new();
+    let app_runner = AppRunner::new(true);
     let vk = app_runner.vk(&binary);
 
     let spell: Spell = serde_yaml::from_slice(

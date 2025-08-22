@@ -1,21 +1,21 @@
 use crate::{
+    cli::BITCOIN,
     script::{control_block, data_script, taproot_spend_info},
     spell,
     spell::{CharmsFee, Input, Output, Spell},
 };
-use anyhow::Error;
+use anyhow::bail;
 use bitcoin::{
-    self,
+    self, Address, Amount, FeeRate, Network, OutPoint, ScriptBuf, TapLeafHash, TapSighashType,
+    Transaction, TxIn, TxOut, Txid, Weight, Witness, XOnlyPublicKey,
     absolute::LockTime,
     hashes::Hash,
     key::Secp256k1,
-    secp256k1::{rand::thread_rng, schnorr, Keypair, Message},
+    secp256k1::{Keypair, Message, rand::thread_rng, schnorr},
     sighash::{Prevouts, SighashCache},
     taproot,
     taproot::LeafVersion,
     transaction::Version,
-    Address, Amount, FeeRate, OutPoint, ScriptBuf, TapLeafHash, TapSighashType, Transaction, TxIn,
-    TxOut, Txid, Weight, Witness, XOnlyPublicKey,
 };
 use charms_client::{bitcoin_tx::BitcoinTx, tx::Tx};
 use charms_data::{TxId, UtxoId};
@@ -282,7 +282,7 @@ pub fn tx_input(ins: &[Input]) -> Vec<TxIn> {
             let utxo_id = u.utxo_id.as_ref().unwrap();
             TxIn {
                 previous_output: OutPoint {
-                    txid: Txid::from_byte_array(utxo_id.0 .0),
+                    txid: Txid::from_byte_array(utxo_id.0.0),
                     vout: utxo_id.1,
                 },
                 script_sig: Default::default(),
@@ -316,23 +316,34 @@ pub fn make_transactions(
     fee_rate: f64,
     charms_fee: Option<CharmsFee>,
     total_cycles: u64,
-) -> Result<Vec<Tx>, Error> {
+) -> anyhow::Result<Vec<Tx>> {
     let change_address = bitcoin::Address::from_str(&change_address)?;
 
-    let funding_utxo = OutPoint::new(Txid::from_byte_array(funding_utxo.0 .0), funding_utxo.1);
+    let network = match &change_address {
+        a if a.is_valid_for_network(Network::Bitcoin) => Network::Bitcoin.to_core_arg(),
+        a if a.is_valid_for_network(Network::Testnet4) => Network::Testnet4.to_core_arg(),
+        a if a.is_valid_for_network(Network::Regtest) => Network::Regtest.to_core_arg(),
+        _ => bail!("Invalid change address: {:?}", change_address),
+    };
+
+    let funding_utxo = OutPoint::new(Txid::from_byte_array(funding_utxo.0.0), funding_utxo.1);
 
     // Parse change address into ScriptPubkey
-    let change_pubkey = change_address.assume_checked().script_pubkey();
+    let change_address_checked = change_address.assume_checked();
 
-    let charms_fee_pubkey = charms_fee.clone().map(|fee| {
-        Address::from_str(&fee.fee_address)
-            .unwrap()
-            .assume_checked()
-            .script_pubkey()
-    });
+    let change_pubkey = change_address_checked.script_pubkey();
+
+    let charms_fee_pubkey = charms_fee
+        .as_ref()
+        .and_then(|charms_fee| charms_fee.fee_address(BITCOIN, network))
+        .and_then(|fee_address| {
+            Address::from_str(fee_address)
+                .ok()
+                .map(|a| a.assume_checked().script_pubkey())
+        });
 
     // Calculate fee
-    let charms_fee = spell::get_charms_fee(charms_fee, total_cycles);
+    let charms_fee = spell::get_charms_fee(&charms_fee, total_cycles);
 
     // Parse fee rate
     let fee_rate = FeeRate::from_sat_per_kwu((fee_rate * 250.0) as u64);

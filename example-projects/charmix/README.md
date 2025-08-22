@@ -1,15 +1,18 @@
 This is a [Charms](https://charms.dev) app.
 
-It is a simple fungible token managed by a reference NFT. The NFT has a state that specifies the remaining total supply of the tokens available to mint. If you control the NFT, you can mint new tokens.
+It is a simple fungible token managed by a reference NFT. The NFT has a state that specifies the remaining total supply
+of the tokens available to mint. If you control the NFT, you can mint new tokens.
 
 Build with:
+
 ```sh
 charms app build
 ```
 
-The resulting RISC-V binary will show up at `./target/charms-app`.
+The resulting Wasm binary will show up at `./target/wasm32-wasip1/release/panoramix-charm.wasm`.
 
 Get the verification key for the app with:
+
 ```sh
 charms app vk
 ```

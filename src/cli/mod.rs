@@ -4,28 +4,29 @@ pub mod spell;
 pub mod tx;
 pub mod wallet;
 
-#[cfg(feature = "prover")]
-use crate::utils::sp1::cuda::SP1CudaProver;
 use crate::{
     cli::{
         server::Server,
         spell::{Check, Prove, SpellCli},
         wallet::{List, WalletCli},
     },
-    spell::{CharmsFee, Prover},
+    spell::{CharmsFee, MockProver, ProveSpellTx, ProveSpellTxImpl},
     utils,
-    utils::{BoxedSP1Prover, Shared},
+    utils::BoxedSP1Prover,
 };
-use bitcoin::{address::NetworkUnchecked, Address};
+#[cfg(feature = "prover")]
+use crate::{
+    spell::Prover,
+    utils::{Shared, sp1::cuda::SP1CudaProver},
+};
+use bitcoin::{Address, Network};
 use charms_app_runner::AppRunner;
+use charms_data::check;
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use clap_complete::{generate, Shell};
-#[cfg(not(feature = "prover"))]
-use reqwest::Client;
+use clap_complete::{Shell, generate};
 use serde::Serialize;
-use sp1_sdk::{install::try_install_circuit_artifacts, CpuProver, ProverClient};
+use sp1_sdk::{CpuProver, NetworkProver, ProverClient, install::try_install_circuit_artifacts};
 use std::{io, net::IpAddr, path::PathBuf, str::FromStr, sync::Arc};
-use utils::AsyncShared;
 
 pub const BITCOIN: &str = "bitcoin";
 pub const CARDANO: &str = "cardano";
@@ -46,23 +47,6 @@ pub struct ServerConfig {
     /// Port to listen on, defaults to 17784.
     #[arg(long, default_value = "17784")]
     port: u16,
-
-    /// bitcoind RPC URL. Set via RPC_URL env var.
-    #[arg(long, env, default_value = "http://localhost:48332")]
-    #[cfg(not(feature = "prover"))]
-    rpc_url: String,
-
-    /// bitcoind RPC user. Recommended to set via RPC_USER env var.
-    #[arg(long, env, default_value = "hello")]
-    #[cfg(not(feature = "prover"))]
-    rpc_user: String,
-
-    /// bitcoind RPC password. Recommended to set via RPC_PASSWORD env var.
-    /// Use the .cookie file in the bitcoind data directory to look up the password:
-    /// the format is `__cookie__:password`.
-    #[arg(long, env, default_value = "world")]
-    #[cfg(not(feature = "prover"))]
-    rpc_password: String,
 }
 
 #[derive(Subcommand)]
@@ -146,6 +130,10 @@ pub struct SpellProveParams {
     /// Target chain, defaults to `bitcoin`.
     #[arg(long, default_value = "bitcoin")]
     chain: String,
+
+    /// Is mock mode enabled?
+    #[arg(long, default_value = "false", hide_env = true)]
+    mock: bool,
 }
 
 #[derive(Args)]
@@ -164,9 +152,16 @@ pub struct SpellCheckParams {
     #[arg(long, value_delimiter = ',')]
     prev_txs: Option<Vec<String>>,
 
-    /// Target chain, defaults to `bitcoin`. Can be `bitcoin` or `cardano`.
-    #[arg(long, default_value = "bitcoin")]
-    chain: String,
+    /// Is mock mode enabled?
+    #[arg(long, default_value = "false", hide_env = true)]
+    mock: bool,
+}
+
+#[derive(Args)]
+pub struct SpellVkParams {
+    /// Is mock mode enabled?
+    #[arg(long, default_value = "false", hide_env = true)]
+    mock: bool,
 }
 
 #[derive(Subcommand)]
@@ -176,25 +171,32 @@ pub enum SpellCommands {
     /// Prove the spell is correct.
     Prove(#[command(flatten)] SpellProveParams),
     /// Print the current protocol version and spell VK (verification key) in JSON.
-    Vk,
+    Vk(#[command(flatten)] SpellVkParams),
+}
+
+#[derive(Args)]
+pub struct ShowSpellParams {
+    #[arg(long, default_value = "bitcoin")]
+    chain: String,
+
+    /// Hex-encoded transaction.
+    #[arg(long)]
+    tx: String,
+
+    /// Output in JSON format (default is YAML).
+    #[arg(long)]
+    json: bool,
+
+    /// Is mock mode enabled?
+    #[arg(long, default_value = "false", hide_env = true)]
+    mock: bool,
 }
 
 #[derive(Subcommand)]
 pub enum TxCommands {
     /// Show the spell in a transaction. If the transaction has a spell and its valid proof, it
     /// will be printed to stdout.
-    ShowSpell {
-        #[arg(long, default_value = "bitcoin")]
-        chain: String,
-
-        /// Hex-encoded transaction.
-        #[arg(long)]
-        tx: String,
-
-        /// Output in JSON format (default is YAML).
-        #[arg(long)]
-        json: bool,
-    },
+    ShowSpell(#[command(flatten)] ShowSpellParams),
 }
 
 #[derive(Subcommand)]
@@ -236,35 +238,10 @@ pub struct WalletListParams {
     /// Output in JSON format (default is YAML)
     #[arg(long)]
     json: bool,
-}
 
-#[derive(Args)]
-pub struct SpellCastParams {
-    /// Path to spell source file (YAML/JSON).
-    #[arg(long, default_value = "/dev/stdin")]
-    spell: PathBuf,
-
-    /// Path to the apps' RISC-V binaries.
-    #[arg(long, value_delimiter = ',')]
-    app_bins: Vec<PathBuf>,
-
-    /// Funding UTXO ID (`txid:vout`).
-    #[arg(long, alias = "funding-utxo-id")]
-    funding_utxo: String,
-
-    /// Fee rate: in sats/vB for Bitcoin.
-    #[arg(long, default_value = "2.0")]
-    fee_rate: f64,
-
-    /// Target chain, defaults to `bitcoin`.
-    #[arg(long, default_value = "bitcoin")]
-    chain: String,
-
-    /// Pre-requisite transactions (hex-encoded) separated by commas (`,`).
-    /// These are the transactions that create the UTXOs that the `tx` (and the spell) spends.
-    /// If the spell has any reference UTXOs, the transactions creating them must also be included.
-    #[arg(long, value_delimiter = ',')]
-    prev_txs: Option<Vec<String>>,
+    /// Is mock mode enabled?
+    #[arg(long, default_value = "false", hide_env = true)]
+    mock: bool,
 }
 
 #[derive(Subcommand)]
@@ -288,11 +265,11 @@ pub async fn run() -> anyhow::Result<()> {
             match command {
                 SpellCommands::Check(params) => spell_cli.check(params),
                 SpellCommands::Prove(params) => spell_cli.prove(params).await,
-                SpellCommands::Vk => spell_cli.print_vk(),
+                SpellCommands::Vk(params) => spell_cli.print_vk(params.mock),
             }
         }
         Commands::Tx { command } => match command {
-            TxCommands::ShowSpell { chain, tx, json } => tx::tx_show_spell(chain, tx, json),
+            TxCommands::ShowSpell(params) => tx::tx_show_spell(params),
         },
         Commands::App { command } => match command {
             AppCommands::New { name } => app::new(&name),
@@ -317,111 +294,87 @@ pub async fn run() -> anyhow::Result<()> {
 }
 
 fn server(server_config: ServerConfig) -> Server {
-    let prover = AsyncShared::new(spell_prover);
+    let prover = ProveSpellTxImpl::new(false);
     Server::new(server_config, prover)
 }
 
-#[tracing::instrument(level = "debug")]
-fn spell_prover() -> Prover {
-    let app_prover = Arc::new(app::Prover {
-        sp1_client: Arc::new(Shared::new(app_sp1_client)),
-        runner: AppRunner::new(),
-    });
-
-    let spell_sp1_client = spell_sp1_client(&app_prover.sp1_client);
-
-    let charms_fee_settings = charms_fee_settings();
-
-    let charms_prove_api_url = std::env::var("CHARMS_PROVE_API_URL")
-        .ok()
-        .unwrap_or("https://prove.charms.dev/spells/prove".to_string());
-
-    #[cfg(not(feature = "prover"))]
-    let client = Client::builder()
-        .use_rustls_tls() // avoids system OpenSSL issues
-        .http2_prior_knowledge()
-        .http2_adaptive_window(true)
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .build()
-        .expect("HTTP client should be created successfully");
-
-    let spell_prover = Prover {
-        app_prover: app_prover.clone(),
-        prover_client: spell_sp1_client.clone(),
-        charms_fee_settings,
-        charms_prove_api_url,
-        #[cfg(not(feature = "prover"))]
-        client,
-    };
-    spell_prover
-}
-
-fn charms_fee_settings() -> Option<CharmsFee> {
-    charms_fee_address().map(|fee_address| {
-        let charms_fee_rate = charms_fee_rate();
-        let charms_fee_base = charms_fee_base();
-        CharmsFee {
-            fee_address: fee_address.assume_checked().to_string(),
-            fee_rate: charms_fee_rate,
-            fee_base: charms_fee_base,
+pub fn prove_impl(mock: bool) -> Box<dyn crate::spell::Prove> {
+    tracing::debug!(mock);
+    #[cfg(feature = "prover")]
+    match mock {
+        false => {
+            let app_prover = Arc::new(crate::app::Prover {
+                sp1_client: Arc::new(Shared::new(crate::cli::app_sp1_client)),
+                runner: AppRunner::new(false),
+            });
+            let spell_sp1_client = crate::cli::spell_sp1_client(&app_prover.sp1_client);
+            Box::new(Prover {
+                app_prover: app_prover.clone(),
+                prover_client: spell_sp1_client.clone(),
+            })
         }
+        true => Box::new(MockProver {
+            app_runner: Arc::new(AppRunner::new(true)),
+        }),
+    }
+    #[cfg(not(feature = "prover"))]
+    Box::new(MockProver {
+        app_runner: Arc::new(AppRunner::new(true)),
     })
 }
 
-fn charms_fee_address() -> Option<Address<NetworkUnchecked>> {
-    std::env::var("CHARMS_FEE_ADDRESS")
-        .ok()
-        .map(|s| Address::from_str(&s).expect("CHARMS_FEE_ADDRESS must be a valid Bitcoin address"))
-}
+pub(crate) fn charms_fee_settings() -> Option<CharmsFee> {
+    let fee_settings_file = std::env::var("CHARMS_FEE_SETTINGS").ok()?;
+    let fee_settings: CharmsFee = serde_yaml::from_reader(
+        &std::fs::File::open(fee_settings_file)
+            .expect("should be able to open the fee settings file"),
+    )
+    .expect("should be able to parse the fee settings file");
 
-fn charms_fee_rate() -> u64 {
-    std::env::var("CHARMS_FEE_RATE")
-        .ok()
-        .map(|s| {
-            s.parse::<u64>()
-                .expect("CHARMS_FEE_RATE must be an unsigned integer")
-        })
-        .unwrap_or(500)
-}
+    assert!(
+        fee_settings.fee_addresses[BITCOIN]
+            .iter()
+            .all(|(network, address)| {
+                let network = Network::from_core_arg(network)
+                    .expect("network should be a valid `bitcoind -chain` argument");
+                check!(
+                    Address::from_str(address)
+                        .is_ok_and(|address| address.is_valid_for_network(network))
+                );
+                true
+            }),
+        "a fee address is not valid for the specified network"
+    );
 
-fn charms_fee_base() -> u64 {
-    std::env::var("CHARMS_FEE_BASE")
-        .ok()
-        .map(|s| {
-            s.parse::<u64>()
-                .expect("CHARMS_FEE_BASE must be an unsigned integer")
-        })
-        .unwrap_or(1000)
+    Some(fee_settings)
 }
 
 fn spell_cli() -> SpellCli {
-    let spell_prover = spell_prover();
-
     let spell_cli = SpellCli {
-        app_prover: spell_prover.app_prover.clone(),
-        spell_prover: Arc::new(spell_prover),
-        app_runner: AppRunner::new(),
+        app_runner: AppRunner::new(true),
     };
     spell_cli
 }
 
+#[cfg(feature = "prover")]
 fn app_sp1_client() -> BoxedSP1Prover {
     let name = std::env::var("APP_SP1_PROVER").unwrap_or_default();
     sp1_named_env_client(name.as_str())
 }
 
+#[cfg(feature = "prover")]
 fn spell_sp1_client(app_sp1_client: &Arc<Shared<BoxedSP1Prover>>) -> Arc<Shared<BoxedSP1Prover>> {
     let name = std::env::var("SPELL_SP1_PROVER").unwrap_or_default();
     match name.as_str() {
         "app" => app_sp1_client.clone(),
-        "env" | "" => Arc::new(Shared::new(sp1_env_client)),
-        _ => unreachable!("Only 'app' or 'env' are supported as SPELL_SP1_PROVER values"),
+        "network" => Arc::new(Shared::new(sp1_network_client)),
+        _ => unreachable!("Only 'app' or 'network' are supported as SPELL_SP1_PROVER values"),
     }
 }
 
 #[tracing::instrument(level = "info")]
 #[cfg(feature = "prover")]
-fn charms_sp1_cuda_client() -> utils::sp1::CudaProver {
+fn charms_sp1_cuda_prover() -> utils::sp1::CudaProver {
     utils::sp1::CudaProver::new(
         sp1_prover::SP1Prover::new(),
         SP1CudaProver::new(gpu_service_url()).unwrap(),
@@ -434,13 +387,18 @@ fn gpu_service_url() -> String {
 }
 
 #[tracing::instrument(level = "info")]
-pub fn sp1_cpu_client() -> CpuProver {
+pub fn sp1_cpu_prover() -> CpuProver {
     ProverClient::builder().cpu().build()
 }
 
-#[tracing::instrument(level = "debug")]
-fn sp1_env_client() -> BoxedSP1Prover {
-    sp1_named_env_client("env")
+#[tracing::instrument(level = "info")]
+pub fn sp1_network_prover() -> NetworkProver {
+    ProverClient::builder().network().build()
+}
+
+#[tracing::instrument(level = "info")]
+pub fn sp1_network_client() -> BoxedSP1Prover {
+    sp1_named_env_client("network")
 }
 
 #[tracing::instrument(level = "debug")]
@@ -452,9 +410,10 @@ fn sp1_named_env_client(name: &str) -> BoxedSP1Prover {
     };
     match name {
         #[cfg(feature = "prover")]
-        "cuda" => Box::new(charms_sp1_cuda_client()),
-        "cpu" => Box::new(sp1_cpu_client()),
-        _ => Box::new(ProverClient::from_env()),
+        "cuda" => Box::new(charms_sp1_cuda_prover()),
+        "cpu" => Box::new(sp1_cpu_prover()),
+        "network" => Box::new(sp1_network_prover()),
+        _ => unimplemented!("only 'cuda', 'cpu' and 'network' are supported as prover values"),
     }
 }
 

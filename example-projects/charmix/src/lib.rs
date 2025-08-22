@@ -1,4 +1,4 @@
-use charms_sdk::data::{app_datas, check, App, Data, Transaction, UtxoId, B32, NFT};
+use charms_sdk::data::{charm_values, check, App, Data, Transaction, B32, NFT};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -30,8 +30,10 @@ fn nft_contract_satisfied(app: &App, tx: &Transaction, w: &Data) -> bool {
     true
 }
 
-fn can_mint_nft(nft_app: &App, tx: &Transaction, w: &Data) -> bool {
-    let w_str: Option<String> = w.value().ok();
+fn can_mint_nft(nft_app: &App, tx: &Transaction, _w: &Data) -> bool {
+    // can only mint an NFT with this contract if the first (index 0) spent UTXO has
+    // the same hash as app identity.
+    let w_str: Option<String> = tx.ins.get(0).map(|(utxo_id, _)| utxo_id.to_string());
 
     check!(w_str.is_some());
     let w_str = w_str.unwrap();
@@ -39,11 +41,7 @@ fn can_mint_nft(nft_app: &App, tx: &Transaction, w: &Data) -> bool {
     // can only mint an NFT with this contract if the hash of `w` is the identity of the NFT.
     check!(hash(&w_str) == nft_app.identity);
 
-    // can only mint an NFT with this contract if spending a UTXO with the same ID as passed in `w`.
-    let w_utxo_id = UtxoId::from_str(&w_str).unwrap();
-    check!(tx.ins.iter().any(|(utxo_id, _)| utxo_id == &w_utxo_id));
-
-    let nft_charms = app_datas(nft_app, tx.outs.iter()).collect::<Vec<_>>();
+    let nft_charms = charm_values(nft_app, tx.outs.iter()).collect::<Vec<_>>();
 
     // can mint exactly one NFT.
     check!(nft_charms.len() == 1);

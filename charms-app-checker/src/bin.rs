@@ -1,4 +1,4 @@
-use charms_client::{AppProverInput, AppProverOutput};
+use charms_app_runner::{AppProverInput, AppProverOutput};
 use charms_data::util;
 
 pub fn main() {
@@ -16,7 +16,7 @@ pub fn main() {
 }
 
 fn run(input: AppProverInput) -> AppProverOutput {
-    let app_runner = charms_app_runner::AppRunner::new();
+    let app_runner = charms_app_runner::AppRunner::new(false);
     let AppProverInput {
         app_binaries,
         tx,

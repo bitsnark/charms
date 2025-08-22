@@ -1,14 +1,12 @@
-use crate::{tx::EnchantedTx, NormalizedSpell, Proof};
+use crate::{NormalizedSpell, Proof, tx, tx::EnchantedTx};
 use anyhow::{anyhow, ensure};
-use charms_data::{util, TxId, UtxoId};
+use charms_data::{TxId, UtxoId, util};
 use cml_chain::{
+    Deserialize, Serialize, SetTransactionInput,
     crypto::TransactionHash,
     plutus::PlutusData,
     transaction::{ConwayFormatTxOut, DatumOption, Transaction, TransactionOutput},
-    Deserialize, Serialize, SetTransactionInput,
 };
-use sp1_verifier::Groth16Verifier;
-
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CardanoTx(pub Transaction);
 
@@ -31,7 +29,11 @@ impl CardanoTx {
 }
 
 impl EnchantedTx for CardanoTx {
-    fn extract_and_verify_spell(&self, spell_vk: &str) -> anyhow::Result<NormalizedSpell> {
+    fn extract_and_verify_spell(
+        &self,
+        spell_vk: &str,
+        mock: bool,
+    ) -> anyhow::Result<NormalizedSpell> {
         let tx = &self.0;
 
         let inputs = &tx.body.inputs;
@@ -60,6 +62,9 @@ impl EnchantedTx for CardanoTx {
         let (spell, proof): (NormalizedSpell, Proof) = util::read(spell_data.as_slice())
             .map_err(|e| anyhow!("could not parse spell and proof: {}", e))?;
 
+        if !mock {
+            ensure!(!spell.mock, "spell is a mock, but we are not in mock mode");
+        }
         ensure!(
             &spell.tx.ins.is_none(),
             "spell must inherit inputs from the enchanted tx"
@@ -71,15 +76,11 @@ impl EnchantedTx for CardanoTx {
 
         let spell = spell_with_ins(spell, inputs);
 
-        let (spell_vk, groth16_vk) = crate::tx::vks(spell.version, spell_vk)?;
+        let spell_vk = tx::spell_vk(spell.version, spell_vk, spell.mock)?;
 
-        Groth16Verifier::verify(
-            &proof,
-            crate::tx::to_sp1_pv(spell.version, &(spell_vk, &spell)).as_slice(),
-            spell_vk,
-            groth16_vk,
-        )
-        .map_err(|e| anyhow!("could not verify spell proof: {}", e))?;
+        let public_values = tx::to_serialized_pv(spell.version, &(spell_vk, &spell));
+
+        tx::verify_snark_proof(&proof, &public_values, spell_vk, spell.version, spell.mock)?;
 
         Ok(spell)
     }

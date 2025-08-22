@@ -1,5 +1,6 @@
-use anyhow::{bail, ensure, Result};
-use charms_data::{is_simple_transfer, util, App, Data, Transaction, B32};
+use anyhow::{Result, bail, ensure};
+use charms_data::{App, B32, Data, Transaction, is_simple_transfer, util};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
@@ -8,15 +9,31 @@ use std::{
 };
 use wasmi::{Caller, Config, Engine, Extern, Linker, Memory, Module, Store};
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AppProverInput {
+    pub app_binaries: BTreeMap<B32, Vec<u8>>,
+    pub tx: Transaction,
+    pub app_public_inputs: BTreeMap<App, Data>,
+    pub app_private_inputs: BTreeMap<App, Data>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AppProverOutput {
+    pub tx: Transaction,
+    pub app_public_inputs: BTreeMap<App, Data>,
+    pub cycles: Vec<u64>,
+}
+
 #[derive(Clone)]
 pub struct AppRunner {
+    pub count_cycles: bool,
     pub engine: Engine,
 }
 
 #[derive(Clone)]
 struct HostState {
-    stdin: Arc<Mutex<Vec<u8>>>,  // Stdin buffer
-    stderr: Arc<Mutex<Vec<u8>>>, // Stderr buffer
+    stdin: Arc<Mutex<Vec<u8>>>,    // Stdin buffer
+    stderr: Arc<Mutex<dyn Write>>, // Stderr buffer
 }
 
 // Helper functions for memory access
@@ -152,7 +169,7 @@ fn fd_write_impl(
     {
         let state = caller.data_mut();
         let mut stderr = state.stderr.lock().unwrap();
-        stderr.extend_from_slice(&all_data);
+        stderr.write_all(&all_data)?;
     }
 
     // Write number of bytes written to nwritten
@@ -182,13 +199,60 @@ fn fd_read(caller: Caller<'_, HostState>, fd: i32, iovs: i32, iovs_len: i32, nre
     })
 }
 
+fn environ_sizes_get_impl(
+    mut caller: Caller<'_, HostState>,
+    environc_ptr: i32,
+    environ_buf_size_ptr: i32,
+) -> Result<i32> {
+    let memory = caller
+        .get_export("memory")
+        .and_then(Extern::into_memory)
+        .ok_or_else(|| anyhow::anyhow!("No memory export"))?;
+
+    // Write 0 for number of environment variables
+    write_i32(&memory, &mut caller, environc_ptr, 0)?;
+    // Write 0 for total buffer size needed
+    write_i32(&memory, &mut caller, environ_buf_size_ptr, 0)?;
+
+    Ok(0) // Success
+}
+
+fn environ_get_impl(
+    _caller: Caller<'_, HostState>,
+    _environ_ptr: i32,
+    _environ_buf_ptr: i32,
+) -> Result<i32> {
+    // Nothing to write for empty environment
+    Ok(0) // Success
+}
+
+fn environ_sizes_get(
+    caller: Caller<'_, HostState>,
+    environc_ptr: i32,
+    environ_buf_size_ptr: i32,
+) -> i32 {
+    environ_sizes_get_impl(caller, environc_ptr, environ_buf_size_ptr).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        -1
+    })
+}
+
+fn environ_get(caller: Caller<'_, HostState>, environ_ptr: i32, environ_buf_ptr: i32) -> i32 {
+    environ_get_impl(caller, environ_ptr, environ_buf_ptr).unwrap_or_else(|e| {
+        eprintln!("error: {}", e);
+        -1
+    })
+}
 const MAX_FUEL_PER_RUN: u64 = 1000000000;
 
 impl AppRunner {
-    pub fn new() -> Self {
+    pub fn new(count_cycles: bool) -> Self {
         let mut config = Config::default();
-        config.consume_fuel(true);
+        if count_cycles {
+            config.consume_fuel(true);
+        }
         Self {
+            count_cycles,
             engine: Engine::new(&config),
         }
     }
@@ -213,24 +277,22 @@ impl AppRunner {
 
         let state = HostState {
             stdin: Arc::new(Mutex::new(stdin_content)),
-            stderr: Arc::new(Mutex::new(Vec::new())),
+            stderr: Arc::new(Mutex::new(std::io::stderr())),
         };
 
         let mut store = Store::new(&self.engine, state.clone());
-        store.set_fuel(MAX_FUEL_PER_RUN)?;
+        if self.count_cycles {
+            store.set_fuel(MAX_FUEL_PER_RUN)?;
+        }
         let mut linker = Linker::new(&self.engine);
 
         linker.func_wrap("wasi_snapshot_preview1", "fd_write", fd_write)?;
         linker.func_wrap("wasi_snapshot_preview1", "fd_read", fd_read)?;
-        linker.func_wrap(
-            "wasi_snapshot_preview1",
-            "environ_get",
-            |_: Caller<'_, HostState>, _: i32, _: i32| -> i32 { -1 },
-        )?;
+        linker.func_wrap("wasi_snapshot_preview1", "environ_get", environ_get)?;
         linker.func_wrap(
             "wasi_snapshot_preview1",
             "environ_sizes_get",
-            |_: Caller<'_, HostState>, _: i32, _: i32| -> i32 { -1 },
+            environ_sizes_get,
         )?;
         linker.func_wrap(
             "wasi_snapshot_preview1",
@@ -240,20 +302,22 @@ impl AppRunner {
 
         let module = Module::new(&self.engine, app_binary)?;
 
-        let instance = linker.instantiate(&mut store, &module)?.start(&mut store)?;
+        let instance = linker.instantiate_and_start(&mut store, &module)?;
 
         let Some(main_func) = instance.get_func(&store, "_start") else {
             unreachable!("we should have a main function")
         };
         let result = main_func.typed::<(), ()>(&store)?.call(&mut store, ());
 
-        let stderr = state.stderr.lock().unwrap();
-        std::io::stderr().write_all(&stderr)?;
+        state.stderr.lock().unwrap().flush()?;
 
-        result?;
+        result.map_err(|e| anyhow::anyhow!("error running wasm: {:?}", e))?;
 
-        let fuel_spent = MAX_FUEL_PER_RUN - store.get_fuel()?;
-        Ok(fuel_spent)
+        let cycles = match self.count_cycles {
+            true => MAX_FUEL_PER_RUN - store.get_fuel()?,
+            false => 0,
+        };
+        Ok(cycles)
     }
 
     pub fn run_all(
@@ -267,21 +331,21 @@ impl AppRunner {
         let app_cycles = app_public_inputs
             .iter()
             .map(|(app, x)| {
-                let w = app_private_inputs.get(app).unwrap_or(&empty);
+                if is_simple_transfer(app, tx) {
+                    eprintln!("➡️  simple transfer w.r.t. app: {}", app);
+                    return Ok(0);
+                }
                 match app_binaries.get(&app.vk) {
                     Some(app_binary) => {
-                        let fuel_spent = self.run(app_binary, app, tx, x, w)?;
+                        let w = app_private_inputs.get(app).unwrap_or(&empty);
+                        let cycles = self.run(app_binary, app, tx, x, w)?;
                         eprintln!("✅  app contract satisfied: {}", app);
-                        Ok(fuel_spent)
+                        Ok(cycles)
                     }
-                    None => {
-                        ensure!(is_simple_transfer(app, tx));
-                        eprintln!("✅  simple transfer ok: {}", app);
-                        Ok(0)
-                    }
+                    None => bail!("app binary not found: {}", app),
                 }
             })
-            .collect::<anyhow::Result<_>>()?;
+            .collect::<Result<_>>()?;
 
         Ok(app_cycles)
     }

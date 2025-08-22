@@ -1,4 +1,4 @@
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{Result, anyhow, ensure};
 use ark_std::{
     cmp::Ordering,
     collections::BTreeMap,
@@ -9,10 +9,9 @@ use ark_std::{
 use ciborium::Value;
 use core::{convert::TryInto, fmt};
 use serde::{
-    de,
+    Deserialize, Deserializer, Serialize, Serializer, de,
     de::{DeserializeOwned, SeqAccess, Visitor},
     ser::SerializeTuple,
-    Deserialize, Deserializer, Serialize, Serializer,
 };
 pub mod util;
 
@@ -48,9 +47,9 @@ macro_rules! check {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Transaction {
     /// Input UTXOs.
-    pub ins: BTreeMap<UtxoId, Charms>,
+    pub ins: Vec<(UtxoId, Charms)>,
     /// Reference UTXOs.
-    pub refs: BTreeMap<UtxoId, Charms>,
+    pub refs: Vec<(UtxoId, Charms)>,
     /// Output charms.
     pub outs: Vec<Charms>,
 }
@@ -70,7 +69,7 @@ impl UtxoId {
     /// Convert to a byte array (of 36 bytes).
     pub fn to_bytes(&self) -> [u8; 36] {
         let mut bytes = [0u8; 36];
-        bytes[..32].copy_from_slice(&self.0 .0); // Copy TxId
+        bytes[..32].copy_from_slice(&self.0.0); // Copy TxId
         bytes[32..].copy_from_slice(&self.1.to_le_bytes()); // Copy index as little-endian
         bytes
     }
@@ -79,7 +78,7 @@ impl UtxoId {
     pub fn from_bytes(bytes: [u8; 36]) -> Self {
         let mut txid_bytes = [0u8; 32];
         txid_bytes.copy_from_slice(&bytes[..32]);
-        let index = u32::from_le_bytes(bytes[32..].try_into().unwrap());
+        let index = u32::from_le_bytes(bytes[32..].try_into().expect("exactly 4 bytes expected"));
         UtxoId(TxId(txid_bytes), index)
     }
 
@@ -322,7 +321,7 @@ impl TxId {
     pub fn from_str(s: &str) -> Result<Self> {
         ensure!(s.len() == 64, "expected 64 hex characters");
         let bytes = hex::decode(s).map_err(|e| anyhow!("invalid txid hex: {}", e))?;
-        let mut txid: [u8; 32] = bytes.try_into().unwrap();
+        let mut txid: [u8; 32] = bytes.try_into().expect("exactly 32 bytes expected");
         txid.reverse();
         Ok(TxId(txid))
     }
@@ -410,7 +409,7 @@ impl B32 {
     pub fn from_str(s: &str) -> Result<Self> {
         ensure!(s.len() == 64, "expected 64 hex characters");
         let bytes = hex::decode(s).map_err(|e| anyhow!("invalid hex: {}", e))?;
-        let hash: [u8; 32] = bytes.try_into().unwrap();
+        let hash: [u8; 32] = bytes.try_into().expect("exactly 32 bytes expected");
         Ok(B32(hash))
     }
 }
@@ -511,7 +510,7 @@ impl Ord for Data {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0
             .partial_cmp(&other.0)
-            .expect("Value comparison should have succeeded")
+            .expect("Value comparison should have succeeded") // PANIC: will panic if CBOR Value comparison returns None (NaN or incomparable). We expect this to never happen (famous last words).
     }
 }
 
@@ -536,7 +535,7 @@ impl Data {
 
     /// Serialize to bytes.
     pub fn bytes(&self) -> Vec<u8> {
-        util::write(&self).expect("serialization should have succeeded")
+        util::write(&self).expect("serialization is expected to succeed")
     }
 }
 
@@ -545,7 +544,7 @@ where
     T: Serialize,
 {
     fn from(value: &T) -> Self {
-        Self(Value::serialized(value).expect("casting to a CBOR Value should have succeeded"))
+        Self(Value::serialized(value).expect("casting to a CBOR Value is expected to succeed"))
     }
 }
 
@@ -580,7 +579,7 @@ pub fn is_simple_transfer(app: &App, tx: &Transaction) -> bool {
 /// outputs.
 pub fn token_amounts_balanced(app: &App, tx: &Transaction) -> bool {
     match (
-        sum_token_amount(app, tx.ins.values()),
+        sum_token_amount(app, tx.ins.iter().map(|(_, v)| v)),
         sum_token_amount(app, tx.outs.iter()),
     ) {
         (Ok(amount_in), Ok(amount_out)) => amount_in == amount_out,
@@ -591,13 +590,24 @@ pub fn token_amounts_balanced(app: &App, tx: &Transaction) -> bool {
 /// Check if the NFT states are preserved in the transaction. This means that the NFTs (created by
 /// the provided `app`) in the `tx` inputs are the same as the NFTs in the `tx` outputs.
 pub fn nft_state_preserved(app: &App, tx: &Transaction) -> bool {
-    let nft_states_in = app_state_multiset(app, tx.ins.values());
+    let nft_states_in = app_state_multiset(app, tx.ins.iter().map(|(_, v)| v));
     let nft_states_out = app_state_multiset(app, tx.outs.iter());
 
     nft_states_in == nft_states_out
 }
 
+/// Deprecated. Use [charm_values] instead.
+#[deprecated(since = "0.7.0", note = "use `charm_values` instead")]
 pub fn app_datas<'a>(
+    app: &'a App,
+    strings_of_charms: impl Iterator<Item = &'a Charms>,
+) -> impl Iterator<Item = &'a Data> {
+    charm_values(app, strings_of_charms)
+}
+
+/// Iterate over all charm values of a given app (charm key) in the given outputs
+/// (strings of charms).
+pub fn charm_values<'a>(
     app: &'a App,
     strings_of_charms: impl Iterator<Item = &'a Charms>,
 ) -> impl Iterator<Item = &'a Data> {
