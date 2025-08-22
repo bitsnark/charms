@@ -888,9 +888,10 @@ impl ProveSpellTxImpl {
 
                 tracing::info!(total_sats_in, funding_utxo_sats, total_sats_out, charms_fee);
             }
-            // CARDANO => {
-            //     todo!()
-            // }
+            CARDANO => {
+                // TODO
+                tracing::warn!("spell validation for cardano is not yet implemented");
+            }
             _ => bail!("unsupported chain: {}", prove_request.chain.as_str()),
         }
         Ok(total_cycles)
