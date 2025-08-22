@@ -898,7 +898,12 @@ impl ProveSpellTxImpl {
 }
 
 pub fn from_hex_txs(prev_txs: &[String]) -> anyhow::Result<Vec<Tx>> {
-    prev_txs.iter().map(|tx_hex| Tx::from_hex(tx_hex)).collect()
+    prev_txs
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|tx_hex| Tx::from_hex(tx_hex))
+        .collect()
 }
 
 pub fn to_hex_txs(txs: &[Tx]) -> Vec<String> {

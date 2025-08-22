@@ -137,6 +137,8 @@ impl Check for SpellCli {
 
         let prev_txs = prev_txs
             .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
             .map(|tx_hex| Tx::from_hex(tx_hex))
             .collect::<Result<Vec<_>, _>>()?;
 
