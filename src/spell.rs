@@ -27,7 +27,9 @@ pub use charms_client::{
     CURRENT_VERSION, NormalizedCharms, NormalizedSpell, NormalizedTransaction, Proof,
     SpellProverInput, to_tx,
 };
-use charms_data::{App, B32, Charms, Data, TOKEN, Transaction, TxId, UtxoId, util};
+use charms_data::{
+    App, B32, Charms, Data, TOKEN, Transaction, TxId, UtxoId, is_simple_transfer, util,
+};
 use charms_lib::SPELL_VK;
 #[cfg(not(feature = "prover"))]
 use reqwest::Client;
@@ -420,6 +422,8 @@ impl Prove for Prover {
         let prev_spells = charms_client::prev_spells(&prev_txs, SPELL_VK, false);
         let tx = to_tx(&norm_spell, &prev_spells, &tx_ins_beamed_source_utxos);
 
+        let app_binaries = filter_app_binaries(&norm_spell, app_binaries, &tx)?;
+
         let app_prover_output = self.app_prover.prove(
             app_binaries,
             tx,
@@ -484,6 +488,9 @@ impl Prove for MockProver {
             true => None,
             false => {
                 let tx = to_tx(&norm_spell, &prev_spells, &tx_ins_beamed_source_utxos);
+
+                let app_binaries = filter_app_binaries(&norm_spell, app_binaries, &tx)?;
+
                 // prove charms-app-checker run
                 let cycles = self.app_runner.run_all(
                     &app_binaries,
@@ -674,8 +681,6 @@ impl ProveSpellTxImpl {
 
         let (norm_spell, app_private_inputs, tx_ins_beamed_source_utxos) = spell.normalized()?;
 
-        let binaries = filter_app_binaries(&norm_spell, binaries)?;
-
         let (norm_spell, proof, proof_app_cycles) = self.prover.prove(
             norm_spell,
             binaries,
@@ -733,10 +738,12 @@ impl ProveSpellTxImpl {
 fn filter_app_binaries(
     norm_spell: &NormalizedSpell,
     app_binaries: BTreeMap<B32, Vec<u8>>,
+    tx: &Transaction,
 ) -> anyhow::Result<BTreeMap<B32, Vec<u8>>> {
     let vks = norm_spell
         .app_public_inputs
         .keys()
+        .filter(|app| !is_simple_transfer(app, tx))
         .map(|app| &app.vk)
         .collect::<BTreeSet<_>>();
     let app_binaries: BTreeMap<_, _> = app_binaries
