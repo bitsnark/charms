@@ -7,6 +7,6 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-charms-app-runner = { path = "../charms-app-runner", version = "0.8.2" }
-charms-data = { path = "../charms-data", version = "0.8.2" }
+charms-app-runner = { path = "../charms-app-runner", version = "0.8.4" }
+charms-data = { path = "../charms-data", version = "0.8.4" }
 sp1-zkvm = { workspace = true }
