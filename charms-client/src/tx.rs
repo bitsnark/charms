@@ -1,7 +1,7 @@
 use crate::{
     CURRENT_VERSION, MOCK_SPELL_VK, NormalizedSpell, V0, V0_SPELL_VK, V1, V1_SPELL_VK, V2,
-    V2_SPELL_VK, V3, V3_SPELL_VK, V4, V4_SPELL_VK, V5, V5_SPELL_VK, ark, bitcoin_tx::BitcoinTx,
-    cardano_tx::CardanoTx,
+    V2_SPELL_VK, V3, V3_SPELL_VK, V4, V4_SPELL_VK, V5, V5_SPELL_VK, V6, V6_SPELL_VK, ark,
+    bitcoin_tx::BitcoinTx, cardano_tx::CardanoTx,
 };
 use anyhow::{anyhow, bail};
 use charms_data::{TxId, util};
@@ -85,6 +85,7 @@ pub fn spell_vk(spell_version: u32, spell_vk: &str, mock: bool) -> anyhow::Resul
     }
     match spell_version {
         CURRENT_VERSION => Ok(spell_vk),
+        V6 => Ok(V6_SPELL_VK),
         V5 => Ok(V5_SPELL_VK),
         V4 => Ok(V4_SPELL_VK),
         V3 => Ok(V3_SPELL_VK),
@@ -101,6 +102,7 @@ pub fn groth16_vk(spell_version: u32, mock: bool) -> anyhow::Result<&'static [u8
     }
     match spell_version {
         CURRENT_VERSION => Ok(CURRENT_GROTH16_VK_BYTES),
+        V6 => Ok(V6_GROTH16_VK_BYTES),
         V5 => Ok(V5_GROTH16_VK_BYTES),
         V4 => Ok(V4_GROTH16_VK_BYTES),
         V3 => Ok(V3_GROTH16_VK_BYTES),
@@ -120,11 +122,12 @@ pub const V3_GROTH16_VK_BYTES: &'static [u8] = V1_GROTH16_VK_BYTES;
 pub const V4_GROTH16_VK_BYTES: &'static [u8] = include_bytes!("../vk/v4/groth16_vk.bin");
 pub const V5_GROTH16_VK_BYTES: &'static [u8] = V4_GROTH16_VK_BYTES;
 pub const V6_GROTH16_VK_BYTES: &'static [u8] = V5_GROTH16_VK_BYTES;
-pub const CURRENT_GROTH16_VK_BYTES: &'static [u8] = V6_GROTH16_VK_BYTES;
+pub const V7_GROTH16_VK_BYTES: &'static [u8] = V6_GROTH16_VK_BYTES;
+pub const CURRENT_GROTH16_VK_BYTES: &'static [u8] = V7_GROTH16_VK_BYTES;
 
 pub fn to_serialized_pv<T: Serialize>(spell_version: u32, t: &T) -> Vec<u8> {
     match spell_version {
-        CURRENT_VERSION | V5 | V4 | V3 | V2 | V1 => {
+        CURRENT_VERSION | V6 | V5 | V4 | V3 | V2 | V1 => {
             // we commit to CBOR-encoded tuple `(spell_vk, n_spell)`
             util::write(t).unwrap()
         }

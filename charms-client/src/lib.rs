@@ -24,24 +24,28 @@ pub const V3_SPELL_VK: &str = "0x0034872b5af38c95fe82fada696b09a448f7ab0928273b7
 pub const V4_SPELL_VK: &str = "0x00c707a155bf8dc18dc41db2994c214e93e906a3e97b4581db4345b3edd837c5";
 /// Verification key for version `5` of the protocol implemented by `charms-spell-checker` binary.
 pub const V5_SPELL_VK: &str = "0x00e98665c417bd2e6e81c449af63b26ed5ad5c400ef55811b592450bf62c67cd";
+/// Verification key for version `6` of the protocol implemented by `charms-proof-wrapper` binary.
+pub const V6_SPELL_VK: &str = "0x005a1df17094445572e4dd474b3e5dd9093936cba62ca3a62bb2ce63d9db8cba";
 
 /// Version `0` of the protocol.
-pub const V0: u32 = 0u32;
+pub const V0: u32 = 0;
 /// Version `1` of the protocol.
-pub const V1: u32 = 1u32;
+pub const V1: u32 = 1;
 /// Version `2` of the protocol.
-pub const V2: u32 = 2u32;
+pub const V2: u32 = 2;
 /// Version `3` of the protocol.
-pub const V3: u32 = 3u32;
+pub const V3: u32 = 3;
 /// Version `4` of the protocol.
-pub const V4: u32 = 4u32;
+pub const V4: u32 = 4;
 /// Version `5` of the protocol.
-pub const V5: u32 = 5u32;
+pub const V5: u32 = 5;
 /// Version `6` of the protocol.
-pub const V6: u32 = 6u32;
+pub const V6: u32 = 6;
+/// Version `7` of the protocol.
+pub const V7: u32 = 7;
 
 /// Current version of the protocol.
-pub const CURRENT_VERSION: u32 = V6;
+pub const CURRENT_VERSION: u32 = V7;
 
 /// Maps the index of the charm's app (in [`NormalizedSpell`].`app_public_inputs`) to the charm's
 /// data.
