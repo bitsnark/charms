@@ -1,0 +1,15 @@
+[package]
+name = "charms-proof-wrapper"
+description = "SNARK wrapper of spell proofs"
+
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+sp1-primitives = { workspace = true }
+sp1-zkvm = { workspace = true, features = ["verify"] }
+
+[dev-dependencies]
+sp1-sdk = { workspace = true }

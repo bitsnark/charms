@@ -1,19 +1,14 @@
 use crate::tx::{EnchantedTx, Tx, extract_and_verify_spell};
+use charms_app_runner::AppInput;
 use charms_data::{App, B32, Charms, Data, Transaction, TxId, UtxoId, check};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub use charms_app_runner::{AppProverInput, AppProverOutput};
-
 pub mod ark;
 pub mod bitcoin_tx;
 pub mod cardano_tx;
 pub mod tx;
-
-pub const APP_VK: [u32; 8] = [
-    379943684, 1320425212, 2011087664, 382625374, 62801581, 1553560260, 1934929111, 166204531,
-];
 
 pub const MOCK_SPELL_VK: &str = "7c38e8639a2eac0074cee920982b92376513e8940f4a7ca6859f17a728af5b0e";
 
@@ -280,7 +275,7 @@ pub struct SpellProverInput {
     pub spell: NormalizedSpell,
     pub tx_ins_beamed_source_utxos: BTreeMap<UtxoId, UtxoId>,
     /// indices of apps in the spell that have contract proofs
-    pub app_prover_output: Option<AppProverOutput>, // proof is provided in input stream data
+    pub app_input: Option<AppInput>,
 }
 
 #[cfg(test)]

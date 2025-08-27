@@ -308,10 +308,7 @@ pub fn prove_impl(mock: bool) -> Box<dyn crate::spell::Prove> {
                 runner: AppRunner::new(false),
             });
             let spell_sp1_client = crate::cli::spell_sp1_client(&app_prover.sp1_client);
-            Box::new(Prover {
-                app_prover: app_prover.clone(),
-                prover_client: spell_sp1_client.clone(),
-            })
+            Box::new(Prover::new(app_prover, spell_sp1_client))
         }
         true => Box::new(MockProver {
             app_runner: Arc::new(AppRunner::new(true)),

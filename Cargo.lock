@@ -1101,6 +1101,7 @@ dependencies = [
  "charms-client",
  "charms-data",
  "charms-lib",
+ "charms-proof-wrapper",
  "clap",
  "clap_complete",
  "cml-chain",
@@ -1126,15 +1127,6 @@ dependencies = [
  "tracing-forest",
  "tracing-subscriber 0.3.19",
  "twirp-rs",
-]
-
-[[package]]
-name = "charms-app-checker"
-version = "0.9.0"
-dependencies = [
- "charms-app-runner",
- "charms-data",
- "sp1-zkvm",
 ]
 
 [[package]]
@@ -1202,6 +1194,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "charms-proof-wrapper"
+version = "0.9.0"
+dependencies = [
+ "sp1-primitives",
+ "sp1-sdk",
+ "sp1-zkvm",
+]
+
+[[package]]
 name = "charms-sdk"
 version = "0.9.0"
 dependencies = [
@@ -1212,6 +1213,7 @@ dependencies = [
 name = "charms-spell-checker"
 version = "0.9.0"
 dependencies = [
+ "charms-app-runner",
  "charms-client",
  "charms-data",
  "serde",
