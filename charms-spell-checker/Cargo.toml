@@ -2,15 +2,25 @@
 name = "charms-spell-checker"
 description = "Recursive validation of spells creating Charms"
 
-version.workspace = true
-authors.workspace = true
-edition.workspace = true
-license.workspace = true
+version = "0.9.0"
+edition = "2024"
+authors = ["Ivan Mikushin <ivan@charms.dev>"]
+license = "MIT"
 
 [dependencies]
 charms-app-runner = { path = "../charms-app-runner", version = "0.9.0" }
 charms-data = { path = "../charms-data", version = "0.9.0" }
 charms-client = { path = "../charms-client", version = "0.9.0" }
-serde = { workspace = true, features = ["derive"] }
-sp1-primitives = { workspace = true }
-sp1-zkvm = { workspace = true, features = ["verify"] }
+sp1-zkvm = { version = "5.2.1", features = ["verify"] }
+
+
+[profile.release]
+lto = "fat"
+opt-level = 3
+strip = "debuginfo"
+
+[patch.crates-io]
+secp256k1 = { git = "https://github.com/sp1-patches/rust-secp256k1", tag = "patch-0.29.1-sp1-5.0.0" }
+sha2 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.9-sp1-4.0.0" }
+
+[workspace]

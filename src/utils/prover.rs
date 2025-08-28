@@ -47,9 +47,9 @@ impl CharmsSP1Prover for NetworkProver {
         let proof = self
             .prove(pk, stdin)
             .mode(kind)
-            .cycle_limit(32000000)
+            .gas_limit(10_000_000)
             .skip_simulation(true)
-            .strategy(FulfillmentStrategy::Hosted)
+            .strategy(FulfillmentStrategy::Auction)
             .run()?;
         Ok((proof, 0))
     }

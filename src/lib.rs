@@ -20,6 +20,19 @@ mod test {
 
     #[test]
     fn test_spell_vk() {
+        let a = std::fs::metadata("./src/bin/charms-spell-checker")
+            .unwrap()
+            .modified()
+            .unwrap();
+        let b = std::fs::metadata("./src/bin/charms-proof-wrapper")
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert!(
+            a < b,
+            "charms-spell-checker MUST be OLDER than charms-proof-wrapper"
+        );
+
         let client = ProverClient::builder().cpu().build();
 
         let (_, vk) = client.setup(PROOF_WRAPPER_BINARY);
