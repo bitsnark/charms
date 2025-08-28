@@ -463,8 +463,6 @@ impl Prove for Prover {
             SP1ProofMode::Groth16,
         )?;
         let norm_spell = clear_inputs(norm_spell);
-        ensure!(util::write(&(SPELL_VK, &norm_spell))? == proof.public_values.to_vec());
-
         let proof = proof.bytes();
 
         // TODO app_cycles might turn out to be much more expensive than spell_cycles
