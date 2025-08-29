@@ -99,7 +99,7 @@ impl SP1CudaProver {
                 .map_err(|e| SP1RecursionProverError::RuntimeError(e.to_string()))?,
         };
 
-        let response = block_on(30, retry(|| self.client.compress(request.clone())))
+        let response = block_on(retry(30, || self.client.compress(request.clone())))
             .map_err(|e| SP1RecursionProverError::RuntimeError(e.to_string()))?;
         let proof: SP1ReduceProof<InnerSC> = bincode::deserialize(&response.result)
             .map_err(|e| SP1RecursionProverError::RuntimeError(e.to_string()))?;
