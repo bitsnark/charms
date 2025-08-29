@@ -43,6 +43,8 @@ use std::{
     str::FromStr,
     sync::Arc,
 };
+#[cfg(not(feature = "prover"))]
+use utils::retry;
 
 /// Charm as represented in a spell.
 /// Map of `$KEY: data`.
@@ -816,12 +818,24 @@ impl ProveSpellTx for ProveSpellTxImpl {
         }
 
         self.validate_prove_request(&prove_request)?;
-        let response = self
-            .client
-            .post(&self.charms_prove_api_url)
-            .json(&prove_request)
-            .send()
-            .await?;
+        let response = retry(60, || async {
+            let response = self
+                .client
+                .post(&self.charms_prove_api_url)
+                .json(&prove_request)
+                .send()
+                .await?;
+            if response.status().is_server_error() {
+                bail!("server error: {}", response.status());
+            }
+            Ok(response)
+        })
+        .await?;
+        if response.status().is_client_error() {
+            let status = response.status();
+            let body = response.text().await?;
+            bail!("client error: {}: {}", status, body);
+        }
         let txs: Vec<String> = response.json().await?;
         Ok(txs)
     }

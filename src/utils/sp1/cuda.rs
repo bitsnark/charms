@@ -1,3 +1,4 @@
+use crate::utils::retry;
 use anyhow::bail;
 use async_trait::async_trait;
 use reqwest::{Request, Response};
@@ -7,12 +8,7 @@ use sp1_cuda::{
     proto::api::{ProverServiceClient, ReadyRequest},
 };
 use sp1_prover::{InnerSC, SP1CoreProof, SP1ProvingKey, SP1RecursionProverError, SP1VerifyingKey};
-use std::{
-    fmt::Debug,
-    future::Future,
-    io,
-    time::{Duration, Instant},
-};
+use std::io;
 use twirp::{
     Client, Middleware, Next, async_trait,
     reqwest::{self},
@@ -45,7 +41,7 @@ impl SP1CudaProver {
     #[tracing::instrument(level = "info", skip_all)]
     pub fn ready(&self) -> anyhow::Result<()> {
         tracing::info!("waiting for proving server to be ready");
-        block_on(retry(|| async {
+        block_on(retry(30, || async {
             match self.client.ready(ReadyRequest {}).await {
                 Ok(response) if response.ready => Ok(()),
                 Ok(_) => bail!("proving server is not ready"),
@@ -71,11 +67,13 @@ impl SP1CudaProver {
             data: bincode::serialize(&payload)
                 .map_err(|e| SP1CoreProverError::SerializationError(e))?,
         };
-        let response = block_on(retry(|| self.client.prove_core_stateless(request.clone())))
-            .map_err(|e| {
-                tracing::error!("{:?}", e);
-                SP1CoreProverError::IoError(io::Error::other(e))
-            })?;
+        let response = block_on(retry(30, || {
+            self.client.prove_core_stateless(request.clone())
+        }))
+        .map_err(|e| {
+            tracing::error!("{:?}", e);
+            SP1CoreProverError::IoError(io::Error::other(e))
+        })?;
         let proof: SP1CoreProof = bincode::deserialize(&response.result)
             .map_err(|e| SP1CoreProverError::SerializationError(e))?;
         Ok(proof)
@@ -101,35 +99,12 @@ impl SP1CudaProver {
                 .map_err(|e| SP1RecursionProverError::RuntimeError(e.to_string()))?,
         };
 
-        let response = block_on(retry(|| self.client.compress(request.clone())))
+        let response = block_on(30, retry(|| self.client.compress(request.clone())))
             .map_err(|e| SP1RecursionProverError::RuntimeError(e.to_string()))?;
         let proof: SP1ReduceProof<InnerSC> = bincode::deserialize(&response.result)
             .map_err(|e| SP1RecursionProverError::RuntimeError(e.to_string()))?;
         Ok(proof)
     }
-}
-
-async fn retry<Fut, F, T, E>(f: F) -> Result<T, E>
-where
-    F: Fn() -> Fut,
-    Fut: Future<Output = Result<T, E>>,
-    E: Debug,
-{
-    let timeout = Duration::from_secs(30);
-    let start_time = Instant::now();
-
-    let mut r = f().await;
-    while r.is_err() {
-        if start_time.elapsed() > timeout {
-            return r;
-        }
-        tracing::warn!("{:?}", r.err().expect("it must be an error at this point"));
-        tracing::info!("retrying...");
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        r = f().await;
-    }
-
-    r
 }
 
 struct LoggingMiddleware;
