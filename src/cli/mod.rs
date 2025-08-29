@@ -105,7 +105,7 @@ pub struct SpellProveParams {
     #[arg(long, value_delimiter = ',')]
     prev_txs: Vec<String>,
 
-    /// Path to the app binaries (RISC-V ELF files) referenced by the spell.
+    /// Paths to the apps' Wasm binaries.
     #[arg(long, value_delimiter = ',')]
     app_bins: Vec<PathBuf>,
 
@@ -142,7 +142,7 @@ pub struct SpellCheckParams {
     #[arg(long, default_value = "/dev/stdin")]
     spell: PathBuf,
 
-    /// Path to the apps' RISC-V binaries.
+    /// Paths to the apps' Wasm binaries.
     #[arg(long, value_delimiter = ',')]
     app_bins: Vec<PathBuf>,
 
@@ -212,7 +212,7 @@ pub enum AppCommands {
 
     /// Show verification key for an app.
     Vk {
-        /// Path to the app's RISC-V binary.
+        /// Path to the app's Wasm binary.
         path: Option<PathBuf>,
     },
 
@@ -222,7 +222,7 @@ pub enum AppCommands {
         #[arg(long, default_value = "/dev/stdin")]
         spell: PathBuf,
 
-        /// Path to the app's RISC-V binary.
+        /// Path to the app's Wasm binary.
         path: Option<PathBuf>,
     },
 }
