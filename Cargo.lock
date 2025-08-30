@@ -1954,6 +1954,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "cml-chain",
+ "const_format",
  "hex",
  "proptest",
  "proptest-derive",

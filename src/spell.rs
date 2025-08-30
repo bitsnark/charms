@@ -31,6 +31,7 @@ use charms_data::{
     App, B32, Charms, Data, TOKEN, Transaction, TxId, UtxoId, is_simple_transfer, util,
 };
 use charms_lib::SPELL_VK;
+use const_format::formatcp;
 #[cfg(not(feature = "prover"))]
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -775,6 +776,9 @@ fn filter_app_binaries(
     Ok(app_binaries)
 }
 
+const CHARMS_PROVE_API_URL: &'static str =
+    formatcp!("https://v{CURRENT_VERSION}.charms.dev/spells/prove");
+
 impl ProveSpellTx for ProveSpellTxImpl {
     #[tracing::instrument(level = "debug")]
     fn new(mock: bool) -> Self {
@@ -782,7 +786,8 @@ impl ProveSpellTx for ProveSpellTxImpl {
 
         let charms_prove_api_url = std::env::var("CHARMS_PROVE_API_URL")
             .ok()
-            .unwrap_or("https://prove.charms.dev/spells/prove".to_string());
+            .unwrap_or(CHARMS_PROVE_API_URL.to_string());
+        tracing::info!(charms_prove_api_url);
 
         let prover = prove_impl(mock);
 
