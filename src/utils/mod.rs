@@ -1,5 +1,9 @@
 use prover::CharmsSP1Prover;
-use std::sync::OnceLock;
+use std::{
+    fmt::Debug,
+    sync::OnceLock,
+    time::{Duration, Instant},
+};
 use tokio::sync::OnceCell;
 
 pub(crate) mod logger;
@@ -50,4 +54,27 @@ impl<T> Shared<T> {
     pub fn get(&self) -> &T {
         self.instance.get_or_init(|| (self.create)())
     }
+}
+
+pub async fn retry<Fut, F, T, E>(secs: u64, f: F) -> Result<T, E>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+    E: Debug,
+{
+    let timeout = Duration::from_secs(secs);
+    let start_time = Instant::now();
+
+    let mut r = f().await;
+    while r.is_err() {
+        if start_time.elapsed() > timeout {
+            return r;
+        }
+        tracing::warn!("{:?}", r.err().expect("it must be an error at this point"));
+        tracing::info!("retrying...");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        r = f().await;
+    }
+
+    r
 }

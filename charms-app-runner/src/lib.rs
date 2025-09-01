@@ -10,18 +10,10 @@ use std::{
 use wasmi::{Caller, Config, Engine, Extern, Linker, Memory, Module, Store};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AppProverInput {
+pub struct AppInput {
     pub app_binaries: BTreeMap<B32, Vec<u8>>,
-    pub tx: Transaction,
     pub app_public_inputs: BTreeMap<App, Data>,
     pub app_private_inputs: BTreeMap<App, Data>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AppProverOutput {
-    pub tx: Transaction,
-    pub app_public_inputs: BTreeMap<App, Data>,
-    pub cycles: Vec<u64>,
 }
 
 #[derive(Clone)]

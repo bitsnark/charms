@@ -4,5 +4,8 @@ async fn main() -> anyhow::Result<()> {
         // We don't want to be in mock mode accidentally.
         std::env::remove_var("MOCK");
     }
-    charms::cli::run().await
+    charms::cli::run().await.map_err(|e| {
+        tracing::error!("Error: {}", e);
+        e
+    })
 }
