@@ -9,7 +9,7 @@ const path = require('path');
 const fs = require('fs');
 
 function main() {
-    const wasmModulePath = path.resolve(__dirname, '../target/wasm-bindgen-nodejs/charms_lib.js');
+    const wasmModulePath = path.resolve(__dirname, '../pkg/charms_lib.js');
     // Ensure wasm artifacts exist
     assert.ok(fs.existsSync(wasmModulePath), `Wasm JS glue not found at ${wasmModulePath}`);
 

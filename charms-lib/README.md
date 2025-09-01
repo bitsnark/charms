@@ -7,7 +7,7 @@ Install LLVM, Rust Wasm target support and wasm-bindgen CLI:
 ```sh
 brew install llvm
 rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli
+cargo install wasm-pack
 ```
 
 Make sure LLVM is in your path:
@@ -21,9 +21,7 @@ export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
 In this directory:
 
 ```sh
-RUSTFLAGS="-C target-cpu=generic" cargo build --release --target wasm32-unknown-unknown
-
-wasm-bindgen --out-dir target/wasm-bindgen-nodejs --target nodejs ../target/wasm32-unknown-unknown/release/charms_lib.wasm
+RUSTFLAGS="-C target-cpu=generic" wasm-pack build --target nodejs
 ```
 
 ## Testing
