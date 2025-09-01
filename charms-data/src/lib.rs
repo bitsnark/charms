@@ -743,3 +743,10 @@ mod tests {
     #[test]
     fn dummy() {}
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AppInput {
+    pub app_binaries: BTreeMap<B32, Vec<u8>>,
+    pub app_public_inputs: BTreeMap<App, Data>,
+    pub app_private_inputs: BTreeMap<App, Data>,
+}
