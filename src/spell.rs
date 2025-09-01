@@ -1,5 +1,5 @@
 use crate::{
-    SPELL_CHECKER_BINARY, app,
+    PROOF_WRAPPER_BINARY, SPELL_CHECKER_BINARY, SPELL_CHECKER_VK, app,
     cli::{BITCOIN, CARDANO, charms_fee_settings, prove_impl},
     tx::{bitcoin_tx, cardano_tx, txs_by_txid},
     utils,
@@ -21,25 +21,31 @@ use ark_std::{
     test_rng,
 };
 use bitcoin::{Amount, Network, hashes::Hash};
-use charms_app_runner::AppRunner;
-use charms_client::{AppProverOutput, MOCK_SPELL_VK, bitcoin_tx::BitcoinTx, tx::Tx, well_formed};
+use charms_app_runner::{AppInput, AppRunner};
 pub use charms_client::{
     CURRENT_VERSION, NormalizedCharms, NormalizedSpell, NormalizedTransaction, Proof,
     SpellProverInput, to_tx,
 };
-use charms_data::{App, B32, Charms, Data, Transaction, TxId, UtxoId, util};
+use charms_client::{MOCK_SPELL_VK, bitcoin_tx::BitcoinTx, tx::Tx, well_formed};
+use charms_data::{
+    App, B32, Charms, Data, TOKEN, Transaction, TxId, UtxoId, is_simple_transfer, util,
+};
 use charms_lib::SPELL_VK;
+use const_format::formatcp;
 #[cfg(not(feature = "prover"))]
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_with::{IfIsHumanReadable, base64::Base64, serde_as};
 use sha2::{Digest, Sha256};
-use sp1_sdk::{SP1ProofMode, SP1Stdin};
+use sp1_prover::{HashableKey, SP1ProvingKey, SP1VerifyingKey};
+use sp1_sdk::{SP1Proof, SP1ProofMode, SP1Stdin};
 use std::{
     collections::{BTreeMap, BTreeSet},
     str::FromStr,
     sync::Arc,
 };
+#[cfg(not(feature = "prover"))]
+use utils::retry;
 
 /// Charm as represented in a spell.
 /// Map of `$KEY: data`.
@@ -415,45 +421,55 @@ impl Prove for Prover {
             "trying to prove a mock spell with a real prover"
         );
 
-        let mut stdin = SP1Stdin::new();
-
         let prev_spells = charms_client::prev_spells(&prev_txs, SPELL_VK, false);
         let tx = to_tx(&norm_spell, &prev_spells, &tx_ins_beamed_source_utxos);
 
-        let app_prover_output = self.app_prover.prove(
-            app_binaries,
-            tx,
-            norm_spell.app_public_inputs.clone(),
-            app_private_inputs,
-            &mut stdin,
-        )?;
+        let app_binaries = filter_app_binaries(&norm_spell, app_binaries, &tx)?;
 
-        let app_cycles = app_prover_output
-            .as_ref()
-            .map(|o| o.cycles.iter().sum())
-            .unwrap_or(0);
+        let app_input = match app_binaries.is_empty() {
+            true => None,
+            false => Some(AppInput {
+                app_binaries,
+                app_public_inputs: norm_spell.app_public_inputs.clone(),
+                app_private_inputs,
+            }),
+        };
 
         let prover_input = SpellProverInput {
             self_spell_vk: SPELL_VK.to_string(),
             prev_txs,
             spell: norm_spell.clone(),
             tx_ins_beamed_source_utxos,
-            app_prover_output,
+            app_input,
         };
 
+        let mut stdin = SP1Stdin::new();
         stdin.write_vec(util::write(&prover_input)?);
 
-        let (pk, _) = self.prover_client.get().setup(SPELL_CHECKER_BINARY);
-        let (proof, spell_cycles) =
-            self.prover_client
-                .get()
-                .prove(&pk, &stdin, SP1ProofMode::Groth16)?;
+        let (proof, _) = self.spell_prover_client.get().prove(
+            &self.spell_checker_pk,
+            &stdin,
+            SP1ProofMode::Compressed,
+        )?;
+        let SP1Proof::Compressed(compressed_proof) = proof.proof else {
+            unreachable!()
+        };
+        tracing::info!("spell proof generated");
+
+        let mut stdin = SP1Stdin::new();
+        stdin.write_vec(proof.public_values.to_vec());
+        stdin.write_proof(*compressed_proof, self.spell_checker_vk.vk.clone());
+
+        let (proof, spell_cycles) = self.wrapper_prover_client.get().prove(
+            &self.proof_wrapper_pk,
+            &stdin,
+            SP1ProofMode::Groth16,
+        )?;
+        let norm_spell = clear_inputs(norm_spell);
         let proof = proof.bytes();
 
-        let norm_spell = clear_inputs(norm_spell);
-
         // TODO app_cycles might turn out to be much more expensive than spell_cycles
-        Ok((norm_spell, proof, app_cycles + spell_cycles))
+        Ok((norm_spell, proof, spell_cycles))
     }
 }
 
@@ -479,30 +495,18 @@ impl Prove for MockProver {
         let norm_spell = make_mock(norm_spell);
 
         let prev_spells = charms_client::prev_spells(&prev_txs, SPELL_VK, true);
+        let tx = to_tx(&norm_spell, &prev_spells, &tx_ins_beamed_source_utxos);
 
-        let app_prover_output = match app_binaries.is_empty() {
-            true => None,
-            false => {
-                let tx = to_tx(&norm_spell, &prev_spells, &tx_ins_beamed_source_utxos);
-                // prove charms-app-checker run
-                let cycles = self.app_runner.run_all(
-                    &app_binaries,
-                    &tx,
-                    &norm_spell.app_public_inputs,
-                    &app_private_inputs,
-                )?;
-                Some(AppProverOutput {
-                    tx,
-                    app_public_inputs: norm_spell.app_public_inputs.clone(),
-                    cycles,
-                })
-            }
-        };
+        let app_binaries = filter_app_binaries(&norm_spell, app_binaries, &tx)?;
 
-        let app_cycles = app_prover_output
-            .as_ref()
-            .map(|o| o.cycles.iter().sum())
-            .unwrap_or(0);
+        let cycles = self.app_runner.run_all(
+            &app_binaries,
+            &tx,
+            &norm_spell.app_public_inputs,
+            &app_private_inputs,
+        )?;
+
+        let app_cycles: u64 = cycles.iter().sum();
 
         // prove charms-spell-checker run
         ensure!(
@@ -647,8 +651,27 @@ pub struct ProveRequest {
 }
 
 pub struct Prover {
-    pub app_prover: Arc<app::Prover>,
-    pub prover_client: Arc<Shared<BoxedSP1Prover>>,
+    pub spell_prover_client: Arc<Shared<BoxedSP1Prover>>,
+    pub wrapper_prover_client: Arc<Shared<BoxedSP1Prover>>,
+    pub spell_checker_pk: SP1ProvingKey,
+    pub spell_checker_vk: SP1VerifyingKey,
+    pub proof_wrapper_pk: SP1ProvingKey,
+}
+
+impl Prover {
+    pub fn new(app_prover: Arc<app::Prover>, prover_client: Arc<Shared<BoxedSP1Prover>>) -> Self {
+        let (spell_checker_pk, spell_checker_vk) = prover_client.get().setup(SPELL_CHECKER_BINARY);
+        assert_eq!(SPELL_CHECKER_VK, spell_checker_vk.hash_u32());
+        let (proof_wrapper_pk, vk) = prover_client.get().setup(PROOF_WRAPPER_BINARY);
+        assert_eq!(SPELL_VK, vk.bytes32().as_str());
+        Self {
+            spell_prover_client: app_prover.sp1_client.clone(),
+            wrapper_prover_client: prover_client,
+            spell_checker_pk,
+            spell_checker_vk,
+            proof_wrapper_pk,
+        }
+    }
 }
 
 pub struct MockProver {
@@ -728,6 +751,34 @@ impl ProveSpellTxImpl {
     }
 }
 
+fn filter_app_binaries(
+    norm_spell: &NormalizedSpell,
+    app_binaries: BTreeMap<B32, Vec<u8>>,
+    tx: &Transaction,
+) -> anyhow::Result<BTreeMap<B32, Vec<u8>>> {
+    let vks = norm_spell
+        .app_public_inputs
+        .keys()
+        .filter(|app| !is_simple_transfer(app, tx))
+        .map(|app| &app.vk)
+        .collect::<BTreeSet<_>>();
+    let app_binaries: BTreeMap<_, _> = app_binaries
+        .into_iter()
+        .filter(|(vk, _)| vks.contains(vk))
+        .collect();
+    if app_binaries.len() != vks.len() {
+        let missing_vks = vks
+            .into_iter()
+            .filter(|&vk| app_binaries.get(vk).is_none())
+            .collect::<Vec<_>>();
+        bail!("missing app binaries for vks: {:?}", missing_vks);
+    }
+    Ok(app_binaries)
+}
+
+const CHARMS_PROVE_API_URL: &'static str =
+    formatcp!("https://v{CURRENT_VERSION}.charms.dev/spells/prove");
+
 impl ProveSpellTx for ProveSpellTxImpl {
     #[tracing::instrument(level = "debug")]
     fn new(mock: bool) -> Self {
@@ -735,7 +786,8 @@ impl ProveSpellTx for ProveSpellTxImpl {
 
         let charms_prove_api_url = std::env::var("CHARMS_PROVE_API_URL")
             .ok()
-            .unwrap_or("https://prove.charms.dev/spells/prove".to_string());
+            .unwrap_or(CHARMS_PROVE_API_URL.to_string());
+        tracing::info!(charms_prove_api_url);
 
         let prover = prove_impl(mock);
 
@@ -771,15 +823,50 @@ impl ProveSpellTx for ProveSpellTxImpl {
         }
 
         self.validate_prove_request(&prove_request)?;
-        let response = self
-            .client
-            .post(&self.charms_prove_api_url)
-            .json(&prove_request)
-            .send()
-            .await?;
+        let response = retry(60, || async {
+            let response = self
+                .client
+                .post(&self.charms_prove_api_url)
+                .json(&prove_request)
+                .send()
+                .await?;
+            if response.status().is_server_error() {
+                bail!("server error: {}", response.status());
+            }
+            Ok(response)
+        })
+        .await?;
+        if response.status().is_client_error() {
+            let status = response.status();
+            let body = response.text().await?;
+            bail!("client error: {}: {}", status, body);
+        }
         let txs: Vec<String> = response.json().await?;
         Ok(txs)
     }
+}
+
+pub fn ensure_no_zero_amounts(norm_spell: &NormalizedSpell) -> anyhow::Result<()> {
+    let apps: Vec<_> = norm_spell
+        .app_public_inputs
+        .iter()
+        .map(|(app, _)| app)
+        .collect();
+    for out in &norm_spell.tx.outs {
+        for (i, data) in out {
+            let app = apps
+                .get(*i as usize)
+                .ok_or(anyhow!("no app for index {}", i))?;
+            if app.tag == TOKEN {
+                ensure!(
+                    data.value::<u64>()? != 0,
+                    "zero output amount for app {}",
+                    app
+                );
+            };
+        }
+    }
+    Ok(())
 }
 
 fn ensure_all_prev_txs_are_present(
@@ -814,6 +901,7 @@ impl ProveSpellTxImpl {
 
         let (norm_spell, app_private_inputs, tx_ins_beamed_source_utxos) =
             prove_request.spell.normalized()?;
+        ensure_no_zero_amounts(&norm_spell)?;
         ensure_all_prev_txs_are_present(&norm_spell, &tx_ins_beamed_source_utxos, &prev_txs_by_id)?;
 
         let prev_spells = charms_client::prev_spells(&prev_txs, SPELL_VK, self.mock);
@@ -840,7 +928,7 @@ impl ProveSpellTxImpl {
                 let network = match &change_address {
                     a if a.is_valid_for_network(Network::Bitcoin) => Network::Bitcoin,
                     a if a.is_valid_for_network(Network::Testnet4) => Network::Testnet4,
-                    a if a.is_valid_for_network(Network::Regtest) => Network::Regtest,
+                    a if a.is_valid_for_network(Network::Regtest) && self.mock => Network::Regtest,
                     _ => bail!(
                         "Unsupported network of change address: {:?}",
                         change_address
@@ -889,9 +977,10 @@ impl ProveSpellTxImpl {
 
                 tracing::info!(total_sats_in, funding_utxo_sats, total_sats_out, charms_fee);
             }
-            // CARDANO => {
-            //     todo!()
-            // }
+            CARDANO => {
+                // TODO
+                tracing::warn!("spell validation for cardano is not yet implemented");
+            }
             _ => bail!("unsupported chain: {}", prove_request.chain.as_str()),
         }
         Ok(total_cycles)
@@ -899,7 +988,12 @@ impl ProveSpellTxImpl {
 }
 
 pub fn from_hex_txs(prev_txs: &[String]) -> anyhow::Result<Vec<Tx>> {
-    prev_txs.iter().map(|tx_hex| Tx::from_hex(tx_hex)).collect()
+    prev_txs
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|tx_hex| Tx::from_hex(tx_hex))
+        .collect()
 }
 
 pub fn to_hex_txs(txs: &[Tx]) -> Vec<String> {

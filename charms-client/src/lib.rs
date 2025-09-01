@@ -1,19 +1,14 @@
 use crate::tx::{EnchantedTx, Tx, extract_and_verify_spell};
+use charms_app_runner::AppInput;
 use charms_data::{App, B32, Charms, Data, Transaction, TxId, UtxoId, check};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub use charms_app_runner::{AppProverInput, AppProverOutput};
-
 pub mod ark;
 pub mod bitcoin_tx;
 pub mod cardano_tx;
 pub mod tx;
-
-pub const APP_VK: [u32; 8] = [
-    379943684, 1320425212, 2011087664, 382625374, 62801581, 1553560260, 1934929111, 166204531,
-];
 
 pub const MOCK_SPELL_VK: &str = "7c38e8639a2eac0074cee920982b92376513e8940f4a7ca6859f17a728af5b0e";
 
@@ -29,24 +24,28 @@ pub const V3_SPELL_VK: &str = "0x0034872b5af38c95fe82fada696b09a448f7ab0928273b7
 pub const V4_SPELL_VK: &str = "0x00c707a155bf8dc18dc41db2994c214e93e906a3e97b4581db4345b3edd837c5";
 /// Verification key for version `5` of the protocol implemented by `charms-spell-checker` binary.
 pub const V5_SPELL_VK: &str = "0x00e98665c417bd2e6e81c449af63b26ed5ad5c400ef55811b592450bf62c67cd";
+/// Verification key for version `6` of the protocol implemented by `charms-proof-wrapper` binary.
+pub const V6_SPELL_VK: &str = "0x005a1df17094445572e4dd474b3e5dd9093936cba62ca3a62bb2ce63d9db8cba";
 
 /// Version `0` of the protocol.
-pub const V0: u32 = 0u32;
+pub const V0: u32 = 0;
 /// Version `1` of the protocol.
-pub const V1: u32 = 1u32;
+pub const V1: u32 = 1;
 /// Version `2` of the protocol.
-pub const V2: u32 = 2u32;
+pub const V2: u32 = 2;
 /// Version `3` of the protocol.
-pub const V3: u32 = 3u32;
+pub const V3: u32 = 3;
 /// Version `4` of the protocol.
-pub const V4: u32 = 4u32;
+pub const V4: u32 = 4;
 /// Version `5` of the protocol.
-pub const V5: u32 = 5u32;
+pub const V5: u32 = 5;
 /// Version `6` of the protocol.
-pub const V6: u32 = 6u32;
+pub const V6: u32 = 6;
+/// Version `7` of the protocol.
+pub const V7: u32 = 7;
 
 /// Current version of the protocol.
-pub const CURRENT_VERSION: u32 = V6;
+pub const CURRENT_VERSION: u32 = V7;
 
 /// Maps the index of the charm's app (in [`NormalizedSpell`].`app_public_inputs`) to the charm's
 /// data.
@@ -280,7 +279,7 @@ pub struct SpellProverInput {
     pub spell: NormalizedSpell,
     pub tx_ins_beamed_source_utxos: BTreeMap<UtxoId, UtxoId>,
     /// indices of apps in the spell that have contract proofs
-    pub app_prover_output: Option<AppProverOutput>, // proof is provided in input stream data
+    pub app_input: Option<AppInput>,
 }
 
 #[cfg(test)]

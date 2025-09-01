@@ -1,7 +1,7 @@
 use crate::{
     cli,
     cli::{BITCOIN, CARDANO, SpellCheckParams, SpellProveParams},
-    spell::{ProveRequest, ProveSpellTx, ProveSpellTxImpl, Spell},
+    spell::{ProveRequest, ProveSpellTx, ProveSpellTxImpl, Spell, ensure_no_zero_amounts},
 };
 use anyhow::{Result, ensure};
 use charms_app_runner::AppRunner;
@@ -137,12 +137,16 @@ impl Check for SpellCli {
 
         let prev_txs = prev_txs
             .iter()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
             .map(|tx_hex| Tx::from_hex(tx_hex))
             .collect::<Result<Vec<_>, _>>()?;
 
         let prev_spells = charms_client::prev_spells(&prev_txs, &SPELL_VK, mock);
 
         let (norm_spell, app_private_inputs, tx_ins_beamed_source_utxos) = spell.normalized()?;
+
+        ensure_no_zero_amounts(&norm_spell)?;
 
         ensure!(
             charms_client::well_formed(&norm_spell, &prev_spells, &tx_ins_beamed_source_utxos),

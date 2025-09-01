@@ -5,10 +5,12 @@ pub mod spell;
 pub mod tx;
 pub mod utils;
 
-/// RISC-V binary compiled from `charms-app-checker`.
-pub const APP_CHECKER_BINARY: &[u8] = include_bytes!("./bin/charms-app-checker");
+pub use charms_proof_wrapper::SPELL_CHECKER_VK;
+
 /// RISC-V binary compiled from `charms-spell-checker`.
 pub const SPELL_CHECKER_BINARY: &[u8] = include_bytes!("./bin/charms-spell-checker");
+/// RISC-V binary compiled from `charms-proof-wrapper`.
+pub const PROOF_WRAPPER_BINARY: &[u8] = include_bytes!("./bin/charms-proof-wrapper");
 
 #[cfg(test)]
 mod test {
@@ -18,12 +20,22 @@ mod test {
 
     #[test]
     fn test_spell_vk() {
+        let a = std::fs::metadata("./src/bin/charms-spell-checker")
+            .unwrap()
+            .modified()
+            .unwrap();
+        let b = std::fs::metadata("./src/bin/charms-proof-wrapper")
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert!(
+            a < b,
+            "charms-spell-checker MUST be OLDER than charms-proof-wrapper"
+        );
+
         let client = ProverClient::builder().cpu().build();
 
-        let (_, vk) = client.setup(APP_CHECKER_BINARY);
-        assert_eq!(charms_client::APP_VK, vk.hash_u32());
-
-        let (_, vk) = client.setup(SPELL_CHECKER_BINARY);
+        let (_, vk) = client.setup(PROOF_WRAPPER_BINARY);
         let s = vk.bytes32();
         assert_eq!(SPELL_VK, s.as_str());
     }

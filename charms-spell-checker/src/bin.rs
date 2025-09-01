@@ -22,14 +22,14 @@ pub(crate) fn run(input: SpellProverInput) -> (String, NormalizedSpell) {
         prev_txs,
         spell,
         tx_ins_beamed_source_utxos,
-        app_prover_output,
+        app_input,
     } = input;
 
     // Check the spell that we're proving is correct.
     assert!(is_correct(
         &spell,
         &prev_txs,
-        app_prover_output,
+        app_input,
         &self_spell_vk,
         &tx_ins_beamed_source_utxos,
     ));

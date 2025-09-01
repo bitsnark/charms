@@ -1,18 +1,15 @@
-pub mod app;
 pub mod bin;
 
-use crate::app::to_public_values;
-use charms_client::{APP_VK, AppProverOutput, NormalizedSpell, tx::Tx};
-use charms_data::{UtxoId, check, is_simple_transfer};
-use serde::Serialize;
-use sp1_zkvm::lib::verify::verify_sp1_proof;
+use charms_app_runner::AppInput;
+use charms_client::{NormalizedSpell, tx::Tx};
+use charms_data::{Transaction, UtxoId, check, is_simple_transfer};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Check if the spell is correct.
 pub(crate) fn is_correct(
     spell: &NormalizedSpell,
     prev_txs: &Vec<Tx>,
-    app_prover_output: Option<AppProverOutput>,
+    app_input: Option<AppInput>,
     spell_vk: &String,
     tx_ins_beamed_source_utxos: &BTreeMap<UtxoId, UtxoId>,
 ) -> bool {
@@ -37,20 +34,24 @@ pub(crate) fn is_correct(
     let apps = charms_client::apps(spell);
 
     let charms_tx = charms_client::to_tx(spell, &prev_spells, tx_ins_beamed_source_utxos);
-    let tx_is_simple_transfer_or_app_proof_is_correct =
-        apps.iter().all(|app| is_simple_transfer(app, &charms_tx))
-            || app_prover_output
-                .is_some_and(|app_prover_output| verify_proof(&APP_VK, &app_prover_output));
-    check!(tx_is_simple_transfer_or_app_proof_is_correct);
+    let tx_is_simple_transfer_or_app_contracts_satisfied =
+        apps.iter().all(|app| is_simple_transfer(app, &charms_tx)) && app_input.is_none()
+            || app_input.is_some_and(|app_input| apps_satisfied(&app_input, &charms_tx));
+    check!(tx_is_simple_transfer_or_app_contracts_satisfied);
 
     true
 }
 
-fn verify_proof<T: Serialize>(vk: &[u32; 8], committed_data: &T) -> bool {
-    let Ok(pv) = to_public_values(committed_data).hash().try_into() else {
-        unreachable!()
-    };
-    verify_sp1_proof(vk, &pv);
+fn apps_satisfied(app_input: &AppInput, tx: &Transaction) -> bool {
+    let app_runner = charms_app_runner::AppRunner::new(false);
+    app_runner
+        .run_all(
+            &app_input.app_binaries,
+            &tx,
+            &app_input.app_public_inputs,
+            &app_input.app_private_inputs,
+        )
+        .expect("all apps should run successfully");
     true
 }
 
