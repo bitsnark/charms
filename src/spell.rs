@@ -823,7 +823,7 @@ impl ProveSpellTx for ProveSpellTxImpl {
         }
 
         self.validate_prove_request(&prove_request)?;
-        let response = retry(60, || async {
+        let response = retry(0, || async {
             let response = self
                 .client
                 .post(&self.charms_prove_api_url)
