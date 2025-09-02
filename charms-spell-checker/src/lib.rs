@@ -1,8 +1,7 @@
 pub mod bin;
 
-use charms_app_runner::AppInput;
 use charms_client::{NormalizedSpell, tx::Tx};
-use charms_data::{Transaction, UtxoId, check, is_simple_transfer};
+use charms_data::{AppInput, Transaction, UtxoId, check, is_simple_transfer};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Check if the spell is correct.

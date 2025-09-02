@@ -1,6 +1,5 @@
 use crate::tx::{EnchantedTx, Tx, extract_and_verify_spell};
-use charms_app_runner::AppInput;
-use charms_data::{App, B32, Charms, Data, Transaction, TxId, UtxoId, check};
+use charms_data::{App, AppInput, B32, Charms, Data, Transaction, TxId, UtxoId, check};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};

@@ -21,14 +21,14 @@ use ark_std::{
     test_rng,
 };
 use bitcoin::{Amount, Network, hashes::Hash};
-use charms_app_runner::{AppInput, AppRunner};
+use charms_app_runner::AppRunner;
 pub use charms_client::{
     CURRENT_VERSION, NormalizedCharms, NormalizedSpell, NormalizedTransaction, Proof,
     SpellProverInput, to_tx,
 };
 use charms_client::{MOCK_SPELL_VK, bitcoin_tx::BitcoinTx, tx::Tx, well_formed};
 use charms_data::{
-    App, B32, Charms, Data, TOKEN, Transaction, TxId, UtxoId, is_simple_transfer, util,
+    App, AppInput, B32, Charms, Data, TOKEN, Transaction, TxId, UtxoId, is_simple_transfer, util,
 };
 use charms_lib::SPELL_VK;
 use const_format::formatcp;
@@ -823,7 +823,7 @@ impl ProveSpellTx for ProveSpellTxImpl {
         }
 
         self.validate_prove_request(&prove_request)?;
-        let response = retry(60, || async {
+        let response = retry(0, || async {
             let response = self
                 .client
                 .post(&self.charms_prove_api_url)

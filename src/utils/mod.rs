@@ -67,7 +67,7 @@ where
 
     let mut r = f().await;
     while r.is_err() {
-        if start_time.elapsed() > timeout {
+        if !timeout.is_zero() && start_time.elapsed() > timeout {
             return r;
         }
         tracing::warn!("{:?}", r.err().expect("it must be an error at this point"));

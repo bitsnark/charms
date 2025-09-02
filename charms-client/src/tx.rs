@@ -41,7 +41,9 @@ serde_with::serde_conv!(
 #[enum_dispatch(EnchantedTx)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Tx {
+    #[serde(alias = "bitcoin")]
     Bitcoin(#[serde_as(as = "BitcoinTxHex")] BitcoinTx),
+    #[serde(alias = "cardano")]
     Cardano(#[serde_as(as = "CardanoTxHex")] CardanoTx),
 }
 
