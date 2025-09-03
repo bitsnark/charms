@@ -1,6 +1,7 @@
 ![Charms](.github/logo-charms.png)
 
 ---
+
 [![crates.io](https://img.shields.io/crates/v/charms)](https://crates.io/crates/charms)
 
 `charms` is a library, CLI tool and web API for programmable tokens and NFTs on top of Bitcoin.
@@ -52,4 +53,5 @@ are, in a way, a generalization of Runes.
 The main difference is that Charms are programmable (and composable).
 
 ---
+
 ©️2025 Charms Inc.
