@@ -15,5 +15,6 @@ jobs:
 
             - name: Push
               run: |
+                  git fetch origin build-binary
                   git checkout build-binary
                   git add --a; git commit -m "Update binary"; git push origin build-binary
