@@ -20,7 +20,6 @@ jobs:
             - name: Build Rust release
               run: |
                     cargo build --release
-                    ls -la target/release/
 
             - name: Create Release
               id: create_release
@@ -31,6 +30,6 @@ jobs:
                   tag_name: ${{ github.ref_name}}
                   name: Release ${{ github.ref_name }}
                   body: "Rust binary built for Linux x86_64"
-                  files: target/release/$(basename $GITHUB_REPOSITORY)
+                  files: target/release/charms
                   draft: false
                   prerelease: false
