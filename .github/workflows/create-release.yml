@@ -13,14 +13,24 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v2
+
+            - name: Install Rust
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Build Rust release
+              run: |
+                    cargo build --release
+                    ls -la target/release/
+
             - name: Create Release
               id: create_release
-              uses: actions/create-release@v1
+              uses: softprops/action-gh-release@v1
               env:
                   GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }} # This token is provided by Actions, you do not need to create your own token
               with:
                   tag_name: ${{ github.ref_name}}
-                  release_name: Release ${{ github.ref_name }}
-                  body: n/a
+                  name: Release ${{ github.ref_name }}
+                  body: "Rust binary built for Linux x86_64"
+                  files: target/release/$(basename $GITHUB_REPOSITORY)
                   draft: false
                   prerelease: false
